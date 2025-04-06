@@ -1,147 +1,139 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
-import { toast } from "sonner";
-import { Toaster } from "@/components/ui/sonner";
+import { Button, Card, Table, Input, Form, Modal, Typography, message, Select, Upload, Space, Layout, Avatar } from "antd";
+import { PlusOutlined, EditOutlined, DeleteOutlined, PictureOutlined, UploadOutlined } from "@ant-design/icons";
 import axios from "axios";
-import { Plus, Pencil, Trash2, Image as ImageIcon } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { removeToken } from "../utils/auth";
+import Sidebar from "../components/Sidebar";
+import PageTransition from "../components/PageTransition";
+import type { UploadFile } from "antd/es/upload/interface";
+
+const { Title, Text, Paragraph } = Typography;
+const { TextArea } = Input;
+const { Option } = Select;
+const { Header, Content } = Layout;
 
 interface RoomType {
-  room_type_id: number;
+  id: number;
   name: string;
-  price: number;
-  capacity: number;
   description: string;
+  price: number;
 }
 
 interface Room {
-  room_id: number;
+  id: number;
   room_number: string;
-  room_type_id: number;
+  type_id: number;
   status: string;
-  preview_images: string[];
-  room_type?: RoomType;
+  floor: string;
+  images: string[];
 }
 
 const RoomManagement = () => {
   const navigate = useNavigate();
-  const [rooms, setRooms] = useState<Room[]>([]);
+  const [user, setUser] = useState<{ fullname: string } | null>(null);
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isAddingRoomType, setIsAddingRoomType] = useState(false);
-  const [isAddingRoom, setIsAddingRoom] = useState(false);
-  const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
-  const [newRoomType, setNewRoomType] = useState({
-    name: "",
-    price: "",
-    capacity: "",
-    description: "",
-  });
-  const [newRoom, setNewRoom] = useState({
-    room_number: "",
-    room_type_id: "",
-    status: "Available",
-    thumbnail: null as File | null,
-    preview_images: [] as File[],
-  });
-
+  const [showAddRoomType, setShowAddRoomType] = useState(false);
+  const [showAddRoom, setShowAddRoom] = useState(false);
+  const [fileList, setFileList] = useState<UploadFile[]>([]);
+  const [addRoomTypeForm] = Form.useForm();
+  const [addRoomForm] = Form.useForm();
+  
   useEffect(() => {
-    fetchRooms();
+    fetchUserProfile();
     fetchRoomTypes();
+    fetchRooms();
   }, []);
 
-  const fetchRooms = async () => {
+  const fetchUserProfile = async () => {
     try {
-      const response = await axios.get<Room[]>("/api/room/getallrooms", {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        navigate("/");
+        return;
+      }
+
+      const response = await axios.get("/api/users/userinfobyid", {
         headers: {
+          Authorization: `Bearer ${token}`,
           "x-api-key": import.meta.env.VITE_API_KEY,
         },
       });
-      setRooms(response.data);
+
+      if (response.data.role.toLowerCase() !== "admin") {
+        message.error("Unauthorized access");
+        navigate("/");
+        return;
+      }
+
+      setUser(response.data);
     } catch (error) {
-      toast.error("Error fetching rooms!");
-    } finally {
-      setIsLoading(false);
+      message.error("Error fetching admin profile");
+      navigate("/");
     }
   };
 
   const fetchRoomTypes = async () => {
     try {
-      const response = await axios.get<RoomType[]>("/api/room/getroomtypes", {
+      const response = await axios.get("/api/room/getroomtypes", {
         headers: {
           "x-api-key": import.meta.env.VITE_API_KEY,
         },
       });
       setRoomTypes(response.data);
     } catch (error) {
-      toast.error("Error fetching room types!");
+      message.error("Error fetching room types");
     }
   };
 
-  const handleAddRoomType = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const fetchRooms = async () => {
+    try {
+      const response = await axios.get("/api/room/getallrooms", {
+        headers: {
+          "x-api-key": import.meta.env.VITE_API_KEY,
+        },
+      });
+      setRooms(response.data);
+    } catch (error) {
+      message.error("Error fetching rooms");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAddRoomType = async (values: any) => {
     try {
       await axios.post(
         "/api/room/add-roomtype",
-        {
-          name: newRoomType.name,
-          price: Number(newRoomType.price),
-          capacity: Number(newRoomType.capacity),
-          description: newRoomType.description,
-        },
+        values,
         {
           headers: {
             "x-api-key": import.meta.env.VITE_API_KEY,
           },
         }
       );
-      toast.success("Room type added successfully!");
-      setIsAddingRoomType(false);
-      setNewRoomType({ name: "", price: "", capacity: "", description: "" });
+      message.success("Room type added successfully");
+      setShowAddRoomType(false);
+      addRoomTypeForm.resetFields();
       fetchRoomTypes();
     } catch (error) {
-      toast.error("Error adding room type!");
+      message.error("Error adding room type");
     }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'thumbnail' | 'preview') => {
-    const files = e.target.files;
-    if (files) {
-      if (type === 'thumbnail') {
-        setNewRoom({ ...newRoom, thumbnail: files[0] });
-      } else {
-        setNewRoom({ ...newRoom, preview_images: Array.from(files) });
-      }
-    }
-  };
-
-  const handleAddRoom = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddRoom = async (values: any) => {
     try {
       const formData = new FormData();
-      formData.append('room_number', newRoom.room_number);
-      formData.append('room_type_id', newRoom.room_type_id);
-      formData.append('status', newRoom.status);
+      fileList.forEach((file) => {
+        if (file.originFileObj) {
+          formData.append("images", file.originFileObj);
+        }
+      });
       
-      if (newRoom.thumbnail) {
-        formData.append('thumbnail', newRoom.thumbnail);
-      }
-      
-      newRoom.preview_images.forEach((file, index) => {
-        formData.append(`preview_images`, file);
+      Object.keys(values).forEach(key => {
+        formData.append(key, values[key]);
       });
 
       await axios.post(
@@ -154,12 +146,14 @@ const RoomManagement = () => {
           },
         }
       );
-      toast.success("Room added successfully!");
-      setIsAddingRoom(false);
-      setNewRoom({ room_number: "", room_type_id: "", status: "Available", thumbnail: null, preview_images: [] });
+      
+      message.success("Room added successfully");
+      setShowAddRoom(false);
+      addRoomForm.resetFields();
+      setFileList([]);
       fetchRooms();
     } catch (error) {
-      toast.error("Error adding room!");
+      message.error("Error adding room");
     }
   };
 
@@ -174,10 +168,10 @@ const RoomManagement = () => {
           },
         }
       );
-      toast.success("Room updated successfully!");
+      message.success("Room updated successfully!");
       fetchRooms();
     } catch (error) {
-      toast.error("Error updating room!");
+      message.error("Error updating room!");
     }
   };
 
@@ -197,284 +191,255 @@ const RoomManagement = () => {
           "Content-Type": "multipart/form-data",
         },
       });
-      toast.success(`${type === 'thumbnail' ? 'Thumbnail' : 'Preview'} uploaded successfully!`);
+      message.success(`${type === 'thumbnail' ? 'Thumbnail' : 'Preview'} uploaded successfully!`);
       fetchRooms();
     } catch (error) {
-      toast.error(`Error uploading ${type}!`);
+      message.error(`Error uploading ${type}!`);
     }
   };
 
+  const columns = [
+    {
+      title: "Room Number",
+      dataIndex: "room_number",
+      key: "room_number",
+    },
+    {
+      title: "Type",
+      dataIndex: "type_id",
+      key: "type_id",
+      render: (typeId: number) => {
+        const roomType = roomTypes.find(type => type.id === typeId);
+        return roomType ? roomType.name : "Unknown";
+      },
+    },
+    {
+      title: "Floor",
+      dataIndex: "floor",
+      key: "floor",
+    },
+    {
+      title: "Status",
+      dataIndex: "status",
+      key: "status",
+      render: (status: string) => (
+        <span className={`capitalize ${status.toLowerCase() === 'available' ? 'text-green-600' : 'text-red-600'}`}>
+          {status}
+        </span>
+      ),
+    },
+    {
+      title: 'Preview',
+      key: 'preview',
+      render: (_: any, record: Room) => (
+        <Space>
+          <Button
+            type="text"
+            icon={<PictureOutlined style={{ color: '#D4AF37' }} />}
+            onClick={() => {
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.accept = 'image/*';
+              input.onchange = (e) => {
+                const file = (e.target as HTMLInputElement).files?.[0];
+                if (file) handleUploadImage(record.id, file, 'thumbnail');
+              };
+              input.click();
+            }}
+          />
+          <Button
+            type="text"
+            icon={<PictureOutlined style={{ color: '#D4AF37' }} />}
+            onClick={() => {
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.accept = 'image/*';
+              input.onchange = (e) => {
+                const file = (e.target as HTMLInputElement).files?.[0];
+                if (file) handleUploadImage(record.id, file, 'preview');
+              };
+              input.click();
+            }}
+          />
+        </Space>
+      )
+    },
+    {
+      title: 'Actions',
+      key: 'actions',
+      render: (_: any, record: Room) => (
+        <Space>
+          <Button
+            type="text"
+            icon={<EditOutlined style={{ color: '#D4AF37' }} />}
+            onClick={() => {
+              // TODO: Implement edit room functionality
+            }}
+          />
+          <Button
+            type="text"
+            icon={<DeleteOutlined style={{ color: '#B22222' }} />}
+            onClick={() => handleUpdateRoom(record.id, {
+              status: record.status === 'Available' ? 'Maintenance' : 'Available'
+            })}
+          />
+        </Space>
+      )
+    }
+  ];
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#D4AF37]"></div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex min-h-screen w-full">
-      {/* Sidebar */}
-      <div className="w-64 bg-[#2C1810] text-white p-4">
-        <h2 className="text-lg font-bold mb-4 text-[#D4AF37]">Admin Panel</h2>
-        <ul>
-          <li className="mb-2">
-            <Button
-              variant="ghost"
-              className="w-full justify-start text-white hover:bg-[#3D2317]"
-              onClick={() => navigate("/admin/dashboard")}
-            >
-              Back to Dashboard
+    <Layout hasSider className="min-h-screen">
+      <Sidebar userRole="admin" userName={user?.fullname} />
+      <Layout>
+        <PageTransition>
+          <Header className="bg-white px-6 flex items-center justify-between">
+            <Title level={4} style={{ margin: 0, color: "#2C1810" }}>
+              Room Management
+            </Title>
+            <div className="space-x-4">
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => setShowAddRoomType(true)}
+              >
+                Add Room Type
+              </Button>
+              <Button
+                type="default"
+                icon={<PlusOutlined />}
+                onClick={() => setShowAddRoom(true)}
+              >
+                Add Room
+              </Button>
+            </div>
+          </Header>
+          <Content className="p-6 bg-[#F5F5F5]">
+            <div className="max-w-6xl mx-auto">
+              <Card className="shadow-md border-[#D4AF37] hover:shadow-lg transition-shadow">
+                <Table
+                  dataSource={rooms}
+                  columns={columns}
+                  rowKey="id"
+                  pagination={{ pageSize: 10 }}
+                  className="custom-table"
+                />
+              </Card>
+            </div>
+          </Content>
+        </PageTransition>
+      </Layout>
+
+      <Modal
+        title="Add Room Type"
+        open={showAddRoomType}
+        onCancel={() => setShowAddRoomType(false)}
+        footer={null}
+      >
+        <Form
+          form={addRoomTypeForm}
+          layout="vertical"
+          onFinish={handleAddRoomType}
+        >
+          <Form.Item
+            name="name"
+            label="Room Type Name"
+            rules={[{ required: true, message: "Please enter room type name" }]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item
+            name="description"
+            label="Description"
+            rules={[{ required: true, message: "Please enter description" }]}
+          >
+            <Input.TextArea />
+          </Form.Item>
+          <Form.Item
+            name="price"
+            label="Price per Night"
+            rules={[{ required: true, message: "Please enter price" }]}
+          >
+            <Input type="number" prefix="₱" />
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit" block>
+              Add Room Type
             </Button>
-          </li>
-          <li className="mb-2">
-            <Button
-              variant="ghost"
-              className="w-full justify-start text-white hover:bg-[#3D2317]"
-              onClick={() => navigate("/admin/user-management")}
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="Add Room"
+        open={showAddRoom}
+        onCancel={() => setShowAddRoom(false)}
+        footer={null}
+      >
+        <Form
+          form={addRoomForm}
+          layout="vertical"
+          onFinish={handleAddRoom}
+        >
+          <Form.Item
+            name="room_number"
+            label="Room Number"
+            rules={[{ required: true, message: "Please enter room number" }]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item
+            name="type_id"
+            label="Room Type"
+            rules={[{ required: true, message: "Please select room type" }]}
+          >
+            <Input type="number" />
+          </Form.Item>
+          <Form.Item
+            name="floor"
+            label="Floor"
+            rules={[{ required: true, message: "Please enter floor" }]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item
+            name="status"
+            label="Status"
+            rules={[{ required: true, message: "Please enter status" }]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item
+            label="Room Images"
+          >
+            <Upload
+              listType="picture-card"
+              fileList={fileList}
+              onChange={({ fileList }) => setFileList(fileList)}
+              beforeUpload={() => false}
             >
-              User Management
-            </Button>
-          </li>
-        </ul>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 p-6 bg-[#F5F5F5]">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold text-[#2C1810]">Room Management</h1>
-          <div className="space-x-4">
-            <Dialog open={isAddingRoomType} onOpenChange={setIsAddingRoomType}>
-              <DialogTrigger asChild>
-                <Button className="bg-[#2C1810] hover:bg-[#3D2317] text-white">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Room Type
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="border-[#D4AF37]">
-                <DialogHeader>
-                  <DialogTitle className="text-[#2C1810]">Add New Room Type</DialogTitle>
-                </DialogHeader>
-                <form onSubmit={handleAddRoomType} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="name" className="text-[#2C1810]">Name</Label>
-                    <Input
-                      id="name"
-                      value={newRoomType.name}
-                      onChange={(e) => setNewRoomType({ ...newRoomType, name: e.target.value })}
-                      required
-                      className="border-[#D4AF37] focus:ring-[#2C1810]"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="price" className="text-[#2C1810]">Price</Label>
-                    <Input
-                      id="price"
-                      type="number"
-                      value={newRoomType.price}
-                      onChange={(e) => setNewRoomType({ ...newRoomType, price: e.target.value })}
-                      required
-                      className="border-[#D4AF37] focus:ring-[#2C1810]"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="capacity" className="text-[#2C1810]">Capacity</Label>
-                    <Input
-                      id="capacity"
-                      type="number"
-                      value={newRoomType.capacity}
-                      onChange={(e) => setNewRoomType({ ...newRoomType, capacity: e.target.value })}
-                      required
-                      className="border-[#D4AF37] focus:ring-[#2C1810]"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="description" className="text-[#2C1810]">Description</Label>
-                    <Textarea
-                      id="description"
-                      value={newRoomType.description}
-                      onChange={(e) => setNewRoomType({ ...newRoomType, description: e.target.value })}
-                      required
-                      className="border-[#D4AF37] focus:ring-[#2C1810]"
-                    />
-                  </div>
-                  <Button type="submit" className="w-full bg-[#2C1810] hover:bg-[#3D2317] text-white">Add Room Type</Button>
-                </form>
-              </DialogContent>
-            </Dialog>
-
-            <Dialog open={isAddingRoom} onOpenChange={setIsAddingRoom}>
-              <DialogTrigger asChild>
-                <Button className="bg-[#2C1810] hover:bg-[#3D2317] text-white">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Room
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="border-[#D4AF37]">
-                <DialogHeader>
-                  <DialogTitle className="text-[#2C1810]">Add New Room</DialogTitle>
-                </DialogHeader>
-                <form onSubmit={handleAddRoom} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="room_number" className="text-[#2C1810]">Room Number</Label>
-                    <Input
-                      id="room_number"
-                      value={newRoom.room_number}
-                      onChange={(e) => setNewRoom({ ...newRoom, room_number: e.target.value })}
-                      required
-                      className="border-[#D4AF37] focus:ring-[#2C1810]"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="room_type" className="text-[#2C1810]">Room Type</Label>
-                    <Select
-                      value={newRoom.room_type_id}
-                      onValueChange={(value: string) => setNewRoom({ ...newRoom, room_type_id: value })}
-                    >
-                      <SelectTrigger className="border-[#D4AF37] focus:ring-[#2C1810]">
-                        <SelectValue placeholder="Select room type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {roomTypes.map((type) => (
-                          <SelectItem key={type.room_type_id} value={type.room_type_id.toString()}>
-                            {type.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="status" className="text-[#2C1810]">Status</Label>
-                    <Select
-                      value={newRoom.status}
-                      onValueChange={(value: string) => setNewRoom({ ...newRoom, status: value })}
-                    >
-                      <SelectTrigger className="border-[#D4AF37] focus:ring-[#2C1810]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Available">Available</SelectItem>
-                        <SelectItem value="Occupied">Occupied</SelectItem>
-                        <SelectItem value="Maintenance">Maintenance</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="thumbnail" className="text-[#2C1810]">Thumbnail Image</Label>
-                    <Input
-                      id="thumbnail"
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) => handleImageUpload(e, 'thumbnail')}
-                      required
-                      className="border-[#D4AF37] focus:ring-[#2C1810]"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="preview_images" className="text-[#2C1810]">Preview Images</Label>
-                    <Input
-                      id="preview_images"
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      onChange={(e) => handleImageUpload(e, 'preview')}
-                      required
-                      className="border-[#D4AF37] focus:ring-[#2C1810]"
-                    />
-                  </div>
-                  <Button type="submit" className="w-full bg-[#2C1810] hover:bg-[#3D2317] text-white">Add Room</Button>
-                </form>
-              </DialogContent>
-            </Dialog>
-          </div>
-        </div>
-
-        <Card className="border-[#D4AF37]">
-          <CardContent className="p-6">
-            {isLoading ? (
-              <div className="flex justify-center items-center h-64">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#D4AF37]"></div>
+              <div>
+                <UploadOutlined />
+                <div style={{ marginTop: 8 }}>Upload</div>
               </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-[#F5F5F5]">
-                    <TableHead className="text-[#2C1810]">Room Number</TableHead>
-                    <TableHead className="text-[#2C1810]">Type</TableHead>
-                    <TableHead className="text-[#2C1810]">Status</TableHead>
-                    <TableHead className="text-[#2C1810]">Preview</TableHead>
-                    <TableHead className="text-[#2C1810]">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rooms.map((room) => (
-                    <TableRow key={room.room_id} className="hover:bg-[#F5F5F5]">
-                      <TableCell className="text-[#2C1810]">{room.room_number}</TableCell>
-                      <TableCell className="text-[#2C1810]">{roomTypes.find(t => t.room_type_id === room.room_type_id)?.name}</TableCell>
-                      <TableCell className="capitalize text-[#2C1810]">{room.status}</TableCell>
-                      <TableCell>
-                        <div className="flex space-x-2">
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => {
-                              const input = document.createElement('input');
-                              input.type = 'file';
-                              input.accept = 'image/*';
-                              input.onchange = (e) => {
-                                const file = (e.target as HTMLInputElement).files?.[0];
-                                if (file) handleUploadImage(room.room_id, file, 'thumbnail');
-                              };
-                              input.click();
-                            }}
-                            className="border-[#D4AF37] text-[#D4AF37] hover:bg-[#F5F5F5]"
-                          >
-                            <ImageIcon className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => {
-                              const input = document.createElement('input');
-                              input.type = 'file';
-                              input.accept = 'image/*';
-                              input.onchange = (e) => {
-                                const file = (e.target as HTMLInputElement).files?.[0];
-                                if (file) handleUploadImage(room.room_id, file, 'preview');
-                              };
-                              input.click();
-                            }}
-                            className="border-[#D4AF37] text-[#D4AF37] hover:bg-[#F5F5F5]"
-                          >
-                            <ImageIcon className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                      <TableCell className="space-x-2">
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={() => {
-                            setSelectedRoom(room);
-                            // TODO: Implement edit room functionality
-                          }}
-                          className="border-[#D4AF37] text-[#D4AF37] hover:bg-[#F5F5F5]"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={() => handleUpdateRoom(room.room_id, {
-                            status: room.status === 'Available' ? 'Maintenance' : 'Available'
-                          })}
-                          className="border-[#B22222] text-[#B22222] hover:bg-[#F5F5F5]"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-      <Toaster />
-    </div>
+            </Upload>
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit" block>
+              Add Room
+            </Button>
+          </Form.Item>
+        </Form>
+      </Modal>
+    </Layout>
   );
 };
 

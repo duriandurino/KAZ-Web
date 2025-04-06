@@ -1,0 +1,816 @@
+//User
+// Add user (Guest or Admin)
+app.post("/users/add-user", validateApiKey, async (req, res) => {
+  const { email, password, fullname, phone_number, role, special_requests, access_level } = req.body;
+
+  console.log("Init add-user");
+
+  if (!email || !password || !fullname || !role) {
+    console.log("Invalid request");
+    return res.status(400).send("Missing required fields");
+  }
+
+  try {
+    console.log("Checking if user already exists");
+
+    db.get("SELECT email FROM User WHERE email = ?", [email], async (err, row) => {
+      if (err) {
+        console.error("Error checking email:", err);
+        return res.status(500).send("Error checking email");
+      }
+
+      if (row) {
+        console.log("Email already exists");
+        return res.status(400).send("Email already exists");
+      }
+
+      const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+      console.log("Inserting into User table");
+
+      db.run(
+        `INSERT INTO User (email, password_hash, fullname, phone_number, role, status, created_at)
+         VALUES (?, ?, ?, ?, ?, 'Active', CURRENT_TIMESTAMP)`,
+        [email, hashedPassword, fullname, phone_number, role],
+        function (err) {
+          if (err) {
+            console.error("Error adding user:", err);
+            return res.status(500).send("Error adding user");
+          }
+
+          const userId = this.lastID;
+
+          console.log("User inserted, user_id:", userId);
+
+          if (role.toLowerCase() === "guest") {
+            console.log("Inserting into Guest table");
+
+            db.run(
+              `INSERT INTO Guest (guest_id, user_id, phone_number, special_requests)
+               VALUES (?, ?, ?, ?)`,
+              [userId, userId, phone_number, special_requests || null],
+              (err) => {
+                if (err) {
+                  console.error("Error adding guest:", err);
+                  return res.status(500).send("Error adding guest");
+                }
+
+                console.log("Guest added successfully");
+                sendUserResponse(res, userId);
+              }
+            );
+
+          } else if (role.toLowerCase() === "admin") {
+            console.log("Inserting into Admin table");
+
+            db.run(
+              `INSERT INTO Admin (admin_id, user_id, access_level)
+               VALUES (?, ?, ?)`,
+              [userId, userId, access_level || "standard"],
+              (err) => {
+                if (err) {
+                  console.error("Error adding admin:", err);
+                  return res.status(500).send("Error adding admin");
+                }
+
+                console.log("Admin added successfully");
+                sendUserResponse(res, userId);
+              }
+            );
+
+          } else {
+            return res.status(400).send("Invalid role. Must be 'guest' or 'admin'.");
+          }
+        }
+      );
+    });
+
+  } catch (error) {
+    console.error("Unexpected error:", error);
+    res.status(500).send("Internal server error");
+  }
+});
+
+function sendUserResponse(res, userId) {
+  db.get("SELECT * FROM User WHERE user_id = ?", [userId], (err, row) => {
+    if (err) {
+      console.error("Error retrieving user:", err);
+      return res.status(500).send("Error retrieving user");
+    }
+
+    if (!row) {
+      return res.status(404).send("User not found after insertion");
+    }
+
+    res.json({
+      message: "User added successfully",
+      user: {
+        id: row.user_id,
+        email: row.email,
+        fullname: row.fullname,
+        phone_number: row.phone_number,
+        role: row.role,
+        status: row.status,
+        created_at: row.created_at,
+      },
+    });
+  });
+}
+
+//edit user
+app.put("/users/update-user", validateApiKey, async (req, res) => {
+  const { userId, password, fullname, phone_number, role, special_requests, access_level } = req.body;
+
+  console.log(`Init update-user for user ID: ${userId}`);
+
+  if (!userId) {
+    console.log("User ID is required");
+    return res.status(400).send("User ID is required");
+  }
+
+  try {
+    console.log("Checking if user exists");
+    
+    db.get("SELECT * FROM User WHERE user_id = ?", [userId], async (err, existingUser) => {
+      if (err) {
+        console.error("Error finding user:", err);
+        return res.status(500).send("Error finding user");
+      }
+
+      if (!existingUser) {
+        console.log("User not found");
+        return res.status(404).send("User not found");
+      }
+
+      let hashedPassword = existingUser.password_hash;
+      if (password) {
+        console.log("Hashing new password");
+        hashedPassword = await bcrypt.hash(password, saltRounds);
+      }
+
+      console.log("Updating User table");
+      
+      db.run(
+        `UPDATE User 
+         SET password_hash = COALESCE(?, password_hash),
+             fullname = COALESCE(?, fullname),
+             phone_number = COALESCE(?, phone_number),
+             role = COALESCE(?, role)
+         WHERE user_id = ?`,
+        [
+          hashedPassword || null,
+          fullname || null,
+          phone_number || null,
+          role || null,
+          userId
+        ],
+        function (err) {
+          if (err) {
+            console.error("Error updating user:", err);
+            return res.status(500).send("Error updating user");
+          }
+
+          console.log("User table updated");
+
+          if (role && role.toLowerCase() === "guest") {
+            console.log("Updating Guest table");
+            
+            db.run(
+              `INSERT OR REPLACE INTO Guest (guest_id, user_id, phone_number, special_requests)
+               VALUES (?, ?, ?, ?)`,
+              [userId, userId, phone_number || existingUser.phone_number, special_requests || null],
+              (err) => {
+                if (err) {
+                  console.error("Error updating guest:", err);
+                  return res.status(500).send("Error updating guest");
+                }
+                console.log("Guest updated successfully");
+                sendUpdatedResponse(res, userId);
+              }
+            );
+
+          } else if (role && role.toLowerCase() === "admin") {
+            console.log("Updating Admin table");
+            
+            db.run(
+              `INSERT OR REPLACE INTO Admin (admin_id, user_id, access_level)
+               VALUES (?, ?, ?)`,
+              [userId, userId, access_level || "standard"],
+              (err) => {
+                if (err) {
+                  console.error("Error updating admin:", err);
+                  return res.status(500).send("Error updating admin");
+                }
+                console.log("Admin updated successfully");
+                sendUpdatedResponse(res, userId);
+              }
+            );
+
+          } else {
+            sendUpdatedResponse(res, userId);
+          }
+        }
+      );
+    });
+
+  } catch (error) {
+    console.error("Unexpected error:", error);
+    res.status(500).send("Internal server error");
+  }
+});
+
+function sendUpdatedResponse(res, userId) {
+  db.get(
+    `SELECT u.*, 
+            g.special_requests, 
+            a.access_level
+     FROM User u
+     LEFT JOIN Guest g ON u.user_id = g.user_id
+     LEFT JOIN Admin a ON u.user_id = a.user_id
+     WHERE u.user_id = ?`,
+    [userId],
+    (err, user) => {
+      if (err) {
+        console.error("Error fetching updated user:", err);
+        return res.status(500).send("Error fetching updated user");
+      }
+
+      res.json({
+        message: "User updated successfully",
+        user: {
+          id: user.user_id,
+          email: user.email,
+          fullname: user.fullname,
+          phone_number: user.phone_number,
+          role: user.role,
+          status: user.status,
+          created_at: user.created_at,
+          special_requests: user.special_requests,
+          access_level: user.access_level
+        }
+      });
+    }
+  );
+}
+
+//login
+app.post("/users/login", validateApiKey, (req, res) => {
+  const { email, password } = req.body;
+
+  console.log("Login attempt for:", email);
+
+  if (!email || !password) {
+    return res.status(400).send("Missing email or password");
+  }
+
+  db.get(
+    "SELECT user_id, email, fullname, password_hash, role, status, google_id FROM User WHERE email = ?",
+    [email],
+    async (err, row) => {
+      if (err) {
+        console.error("Database error:", err);
+        return res.status(500).send("Error finding user");
+      }
+
+      if (!row) {
+        console.log("403 - User not found");
+        return res.status(403).send("User not found");
+      }
+      
+      if(row.status == 'Inactive'){
+        return res.status(401).send("Account is Inactive");
+      }
+
+      if (row.google_id) {
+        console.log("User registered via Google, cannot log in with password");
+        return res
+          .status(400)
+          .send("This account is linked to Google. Please log in with Google.");
+      }
+
+      const isMatch = await bcrypt.compare(password, row.password_hash);
+      if (!isMatch) {
+        console.log("401 - Invalid password");
+        return res.status(401).send("Invalid credentials");
+      }
+
+      const token = jwt.sign(
+        { user_id: row.user_id, email: row.email, role: row.role },
+        process.env.JWT_SECRET,
+        { expiresIn: "1h" }
+      );
+
+      res.json({
+        message: "Login successful!",
+        token,
+        user: {
+          id: row.user_id,
+          email: row.email,
+          fullname: row.fullname,
+          role: row.role,
+          status: row.status,
+        },
+      });
+
+      console.log(row.email + " - Login success");
+    }
+  );
+});
+
+
+// Google Login Endpoint
+app.post("/users/login-google", async (req, res) => {
+  const { token } = req.body;
+
+  if (!token) {
+    return res.status(400).send("Missing Google token");
+  }
+
+  try {
+    const ticket = await client.verifyIdToken({
+      idToken: token,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+    const googleId = payload.sub; 
+    const email = payload.email;
+    const fullname = payload.name;
+
+    console.log("Google User:", { googleId, email, fullname });
+
+    db.get("SELECT * FROM User WHERE google_id = ? OR email = ?", [googleId, email], (err, user) => {
+      if (err) {
+        console.error("Database error:", err);
+        return res.status(500).send("Database error");
+      }
+
+      if (user) {
+        if (!user.google_id) {
+          db.run("UPDATE User SET google_id = ? WHERE email = ?", [googleId, email], (err) => {
+            if (err) {
+              console.error("Error updating Google ID:", err);
+              return res.status(500).send("Error updating Google ID");
+            }
+          });
+        }
+        
+        if(user.status == 'Inactive'){
+          return res.status(401).send("Account is Inactive");
+        }
+
+        const token = jwt.sign(
+          { user_id: user.user_id, email: user.email, role: user.role },
+          process.env.JWT_SECRET,
+          { expiresIn: "1h" }
+        );
+
+        return res.json({
+          message: "Login successful",
+          token, 
+          user: {
+            id: user.user_id,
+            email: user.email,
+            fullname: user.fullname,
+            phone_number: user.phone_number,
+            role: user.role,
+            status: user.status,
+            created_at: user.created_at,
+          },
+        });
+      } else {
+        db.run(
+          `INSERT INTO User (email, fullname, google_id, role, status, created_at)
+           VALUES (?, ?, ?, 'guest', 'Active', CURRENT_TIMESTAMP)`,
+          [email, fullname, googleId],
+          function (err) {
+            if (err) {
+              console.error("Error adding Google user:", err);
+              return res.status(500).send("Error adding Google user");
+            }
+
+            const userId = this.lastID;
+
+            db.run(
+              `INSERT INTO Guest (guest_id, user_id, phone_number, special_requests)
+               VALUES (?, ?, ?, ?)`,
+              [userId, userId, null, null],
+              (err) => {
+                if (err) {
+                  console.error("Error adding guest:", err);
+                  return res.status(500).send("Error adding guest");
+                }
+
+                const token = jwt.sign(
+                  { user_id: userId, email: email, role: "guest" },
+                  process.env.JWT_SECRET,
+                  { expiresIn: "1h" }
+                );
+
+                res.json({
+                  message: "User registered and logged in successfully",
+                  token, 
+                  user: {
+                    id: userId,
+                    email: email,
+                    fullname: fullname,
+                    role: "guest",
+                    status: "Active",
+                    created_at: new Date().toISOString(),
+                  },
+                });
+              }
+            );
+          }
+        );
+      }
+    });
+  } catch (error) {
+    console.error("Google token verification failed:", error);
+    res.status(401).send("Invalid Google token");
+  }
+});
+
+
+//get all users
+app.get("/users/getallusers", validateApiKey, (req, res) => {
+  db.all(
+    `SELECT user_id, fullname, email, password_hash, phone_number, role, status, google_id, created_at 
+     FROM User`,
+    [],
+    (err, users) => {
+      if (err) {
+        console.error("Database error:", err);
+        return res.status(500).send("Error retrieving users");
+      }
+
+      if (!users.length) {
+        return res.status(404).send("No users found");
+      }
+
+      const userPromises = users.map((user) => {
+        return new Promise((resolve) => {
+          if (user.role === "guest") {
+            db.get(
+              "SELECT special_requests FROM Guest WHERE guest_id = ?",
+              [user.user_id],
+              (err, guest) => {
+                user.special_requests = guest?.special_requests || null;
+                resolve(user);
+              }
+            );
+          } else if (user.role === "admin") {
+            db.get(
+              "SELECT access_level FROM Admin WHERE admin_id = ?",
+              [user.user_id],
+              (err, admin) => {
+                user.access_level = admin?.access_level || "N/A";
+                resolve(user);
+              }
+            );
+          } else {
+            resolve(user);
+          }
+        });
+      });
+
+      Promise.all(userPromises).then((updatedUsers) => {
+        res.json(updatedUsers);
+      });
+    }
+  );
+});
+
+
+//get user by id
+app.get("/users/userinfobyid", validateApiKey, authenticateToken, (req, res) => {
+  const userId = req.user.user_id; 
+
+  if (!userId) {
+    return res.status(400).json({ message: "User ID is required" });
+  }
+
+  db.get(
+    `SELECT user_id, fullname, email, phone_number, role, status, google_id, created_at 
+     FROM User WHERE user_id = ?`,
+    [userId],
+    (err, user) => {
+      if (err) {
+        console.error("Database error:", err);
+        return res.status(500).send("Error finding user");
+      }
+
+      if (!user) {
+        return res.status(403).send("User not found");
+      }
+
+      if (user.role === "guest") {
+        db.get(
+          "SELECT special_requests FROM Guest WHERE guest_id = ?",
+          [userId],
+          (err, guest) => {
+            if (err) {
+              console.error("Error fetching guest details:", err);
+            }
+            res.json({ ...user, special_requests: guest?.special_requests || null });
+          }
+        );
+      } else if (user.role === "admin") {
+        db.get(
+          "SELECT access_level FROM Admin WHERE admin_id = ?",
+          [userId],
+          (err, admin) => {
+            if (err) {
+              console.error("Error fetching admin details:", err);
+            }
+            res.json({ ...user, access_level: admin?.access_level || "N/A" });
+          }
+        );
+      } else {
+        res.json(user);
+      }
+    }
+  );
+});
+
+
+app.put("/users/deactivateuserbyid", validateApiKey, (req, res) => {
+  const { user_id } = req.body;
+
+  if (!user_id) {
+    return res.status(400).json({ message: "User ID is required" });
+  }
+
+  db.get("SELECT * FROM User WHERE user_id=?", [user_id], (err, user) => {
+    if (err) {
+      console.error("Database error:", err);
+      return res.status(500).json({ message: "Error finding user" });
+    }
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    db.run("UPDATE User SET status='Inactive' WHERE user_id=?", [user_id], (err) => {
+      if (err) {
+        console.error("Error updating user status:", err);
+        return res.status(500).json({ message: "Error updating user status" });
+      }
+
+      res.json({
+        message: "User deactivated successfully",
+        user: { ...user, status: "Inactive" },
+      });
+
+      console.log(`User ID ${user_id} marked as Inactive.`);
+    });
+  });
+});
+//User^
+
+//Room Related
+app.post('/room/add-roomtype', validateApiKey, authenticateToken, async (req, res) => {
+  const { name, price, capacity, description } = req.body;
+
+  db.run(
+    `INSERT INTO RoomType (name, price, capacity, description) 
+     VALUES (?, ?, ?, ?)`,
+    [name, price, capacity, description],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      
+      res.status(201).json({
+        room_type_id: this.lastID,
+        name,
+        price,
+        capacity
+      });
+    }
+  );
+});
+
+app.get('/room/getroomtypes', validateApiKey, async (req, res) => {
+  db.all(
+    `SELECT rt.*, 
+     (SELECT image_url FROM Image WHERE room_type_id = rt.room_type_id AND image_purpose = 'thumbnail' LIMIT 1) AS thumbnail_url
+     FROM RoomType rt`,
+    [],
+    (err, roomTypes) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(roomTypes);
+    }
+  );
+});
+
+app.post('/room/add-room', validateApiKey, authenticateToken, async (req, res) => {
+  const { room_number, room_type_id, status } = req.body;
+
+  db.run(
+    `INSERT INTO Room (room_number, room_type_id, status) 
+     VALUES (?, ?, ?)`,
+    [room_number, room_type_id, status || 'available'],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      
+      res.status(201).json({
+        room_id: this.lastID,
+        room_number,
+        room_type_id,
+        status
+      });
+    }
+  );
+});
+
+app.get('/room/getallrooms', validateApiKey, async (req, res) => {
+  db.all(
+    `SELECT 
+       r.room_id,
+       r.room_number,
+       r.status,
+       rt.name AS room_type,
+       rt.price,
+       rt.capacity,
+       (SELECT GROUP_CONCAT(image_url) 
+        FROM Image 
+        WHERE room_id = r.room_id AND image_purpose = 'preview') AS preview_images
+     FROM Room r
+     JOIN RoomType rt ON r.room_type_id = rt.room_type_id`,
+    [],
+    (err, rooms) => {
+      if (err) return res.status(500).json({ error: err.message });
+      
+      const formattedRooms = rooms.map(room => ({
+        ...room,
+        preview_images: room.preview_images ? room.preview_images.split(',') : []
+      }));
+      
+      res.json(formattedRooms);
+    }
+  );
+});
+
+app.get('/room/getroombyid', validateApiKey, async (req, res) => {
+  const roomId = req.params.id;
+
+  db.get(
+    `SELECT 
+       r.*,
+       rt.name AS room_type_name,
+       rt.description AS room_type_description
+     FROM Room r
+     JOIN RoomType rt ON r.room_type_id = rt.room_type_id
+     WHERE r.room_id = ?`,
+    [roomId],
+    async (err, room) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (!room) return res.status(404).json({ error: 'Room not found' });
+
+      db.all(
+        `SELECT image_id, image_url, image_purpose 
+         FROM Image 
+         WHERE room_id = ?`,
+        [roomId],
+        (err, images) => {
+          if (err) return res.status(500).json({ error: err.message });
+          
+          res.json({
+            ...room,
+            images: images || []
+          });
+        }
+      );
+    }
+  );
+});
+
+app.put('/room/updateroombyid', validateApiKey, authenticateToken, async (req, res) => {
+  const roomId = req.params.id;
+  const { room_number, room_type_id, status } = req.body;
+
+  db.run(
+    `UPDATE Room 
+     SET room_number = ?, 
+         room_type_id = ?, 
+         status = ?
+     WHERE room_id = ?`,
+    [room_number, room_type_id, status, roomId],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      if (this.changes === 0) return res.status(404).json({ error: 'Room not found' });
+      
+      res.json({
+        room_id: roomId,
+        updated: this.changes
+      });
+    }
+  );
+});
+//Room Related^
+//Image Related
+// Image Endpoints
+// POST - Create image metadata
+app.post('/api/images', validateImageData, (req, res) => {
+  const { guest_id, room_id, image_purpose, image_url, delete_hash, file_id, width, height } = req.body;
+  
+  const sql = `
+    INSERT INTO Image 
+    (guest_id, room_id, image_purpose, image_url, delete_hash, file_id, width, height, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+  `;
+
+  db.run(sql, [guest_id, room_id, image_purpose, image_url, delete_hash, file_id, width, height], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ 
+      image_id: this.lastID,
+      message: 'Image created successfully'
+    });
+  });
+});
+
+// GET - Get all images (with optional filters)
+app.get('/api/images', (req, res) => {
+  const { guest_id, room_id, purpose } = req.query;
+  let sql = 'SELECT * FROM Image WHERE 1=1';
+  const params = [];
+
+  if (guest_id) { sql += ' AND guest_id = ?'; params.push(guest_id); }
+  if (room_id) { sql += ' AND room_id = ?'; params.push(room_id); }
+  if (purpose) { sql += ' AND image_purpose = ?'; params.push(purpose); }
+
+  db.all(sql, params, (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
+  });
+});
+
+// GET - Get single image by ID
+app.get('/api/images/:id', (req, res) => {
+  db.get('SELECT * FROM Image WHERE image_id = ?', [req.params.id], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!row) return res.status(404).json({ error: 'Image not found' });
+    res.json(row);
+  });
+});
+
+// PUT - Update image metadata
+app.put('/api/images/:id', (req, res) => {
+  const updates = [];
+  const params = [];
+  const allowedFields = ['guest_id', 'room_id', 'image_purpose', 'image_url', 'delete_hash', 'file_id', 'width', 'height'];
+
+  allowedFields.forEach(field => {
+    if (req.body[field] !== undefined) {
+      updates.push(`${field} = ?`);
+      params.push(req.body[field]);
+    }
+  });
+
+  if (updates.length === 0) return res.status(400).json({ error: 'No valid fields to update' });
+  
+  params.push(req.params.id);
+  const sql = `UPDATE Image SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE image_id = ?`;
+
+  db.run(sql, params, function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    if (this.changes === 0) return res.status(404).json({ error: 'Image not found' });
+    res.json({ message: 'Image updated successfully' });
+  });
+});
+
+// DELETE - Delete image
+app.delete('/api/images/:id', (req, res) => {
+  const { delete_hash } = req.body;
+  if (!delete_hash) return res.status(400).json({ error: 'delete_hash is required' });
+
+  db.get('SELECT delete_hash FROM Image WHERE image_id = ?', [req.params.id], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!row) return res.status(404).json({ error: 'Image not found' });
+    if (row.delete_hash !== delete_hash) return res.status(403).json({ error: 'Invalid delete_hash' });
+
+    db.run('DELETE FROM Image WHERE image_id = ?', [req.params.id], (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ message: 'Image deleted successfully' });
+    });
+  });
+});
+
+// Validation middleware
+function validateImageData(req, res, next) {
+  const required = ['image_purpose', 'image_url', 'delete_hash'];
+  const allowedPurposes = ['profile', 'room_preview', 'amenity'];
+  
+  if (!required.every(field => req.body[field])) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  
+  if (!allowedPurposes.includes(req.body.image_purpose)) {
+    return res.status(400).json({ error: 'Invalid image purpose' });
+  }
+
+  if (!req.body.guest_id && !req.body.room_id) {
+    return res.status(400).json({ error: 'Either guest_id or room_id must be provided' });
+  }
+
+  next();
+}

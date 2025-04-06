@@ -1,17 +1,19 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
-import { toast } from "sonner";
-import { Toaster } from "@/components/ui/sonner"
+import { Button, Card, Table, Typography, message, Space, Layout } from "antd";
+import { UserOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import axios from "axios";
-import { Pencil, Trash2 } from "lucide-react";
+import { removeToken } from "../utils/auth";
+import Sidebar from "../components/Sidebar";
+import PageTransition from "../components/PageTransition";
+
+const { Title, Text, Paragraph } = Typography;
+const { Header, Content } = Layout;
 
 interface User {
-  user_id: number;
-  fullname: string;
+  id: number;
   email: string;
+  fullname: string;
   role: string;
   status: string;
 }
@@ -20,6 +22,7 @@ const UserManagement = () => {
   const navigate = useNavigate();
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
     fetchUsers();
@@ -34,117 +37,139 @@ const UserManagement = () => {
       });
       setUsers(response.data);
     } catch (error) {
-      toast.error("Error retrieving users!");
+      message.error("Error fetching users!");
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleEditUser = (userId: number) => {
-    toast.info("Edit functionality coming soon!");
+  const handleEditUser = async (userId: number, updates: Partial<User>) => {
+    try {
+      await axios.put(
+        `/api/users/update-user`,
+        { userId, ...updates },
+        {
+          headers: {
+            "x-api-key": import.meta.env.VITE_API_KEY,
+          },
+        }
+      );
+      message.success("User updated successfully!");
+      fetchUsers();
+    } catch (error) {
+      message.error("Error updating user!");
+    }
   };
 
   const handleDeactivateUser = async (userId: number) => {
     try {
-      await axios.delete("/api/users/deactivateuserbyid", {
-        headers: {
-          "x-api-key": import.meta.env.VITE_API_KEY,
-        },
-        data: { user_id: userId },
-      });
-      toast.success("User deactivated successfully!");
-      fetchUsers(); // Refresh the user list
+      await axios.put(
+        `/api/users/deactivateuserbyid`,
+        { user_id: userId },
+        {
+          headers: {
+            "x-api-key": import.meta.env.VITE_API_KEY,
+          },
+        }
+      );
+      message.success("User deactivated successfully!");
+      fetchUsers();
     } catch (error) {
-      toast.error("Error deactivating user!");
+      message.error("Error deactivating user!");
     }
   };
 
-  return (
-    <div className="flex min-h-screen w-full">
-      {/* Sidebar */}
-      <div className="w-64 bg-[#2C1810] text-white p-4">
-        <h2 className="text-lg font-bold mb-4 text-[#D4AF37]">Admin Panel</h2>
-        <ul>
-          <li className="mb-2">
-            <Button
-              variant="ghost"
-              className="w-full justify-start text-white hover:bg-[#3D2317]"
-              onClick={() => navigate("/admin/dashboard")}
-            >
-              Back to Dashboard
-            </Button>
-          </li>
-          <li className="mb-2">
-            <Button
-              variant="ghost"
-              className="w-full justify-start text-white hover:bg-[#3D2317]"
-              onClick={() => navigate("/admin/room-management")}
-            >
-              Room Management
-            </Button>
-          </li>
-        </ul>
-      </div>
+  const columns = [
+    {
+      title: 'ID',
+      dataIndex: 'id',
+      key: 'id',
+      render: (text: number) => <Text style={{ color: '#2C1810' }}>{text}</Text>
+    },
+    {
+      title: 'Name',
+      dataIndex: 'fullname',
+      key: 'fullname',
+      render: (text: string) => <Text style={{ color: '#2C1810' }}>{text}</Text>
+    },
+    {
+      title: 'Email',
+      dataIndex: 'email',
+      key: 'email',
+      render: (text: string) => <Text style={{ color: '#2C1810' }}>{text}</Text>
+    },
+    {
+      title: 'Role',
+      dataIndex: 'role',
+      key: 'role',
+      render: (text: string) => (
+        <Text style={{ color: '#2C1810', textTransform: 'capitalize' }}>{text}</Text>
+      )
+    },
+    {
+      title: 'Status',
+      dataIndex: 'status',
+      key: 'status',
+      render: (text: string) => (
+        <Text style={{ color: '#2C1810', textTransform: 'capitalize' }}>{text}</Text>
+      )
+    },
+    {
+      title: 'Actions',
+      key: 'actions',
+      render: (_: any, record: User) => (
+        <Space>
+          <Button
+            type="text"
+            icon={<EditOutlined style={{ color: '#D4AF37' }} />}
+            onClick={() => {
+              // TODO: Implement edit user functionality
+            }}
+          />
+          <Button
+            type="text"
+            icon={<DeleteOutlined style={{ color: '#B22222' }} />}
+            onClick={() => handleDeactivateUser(record.id)}
+          />
+        </Space>
+      )
+    }
+  ];
 
-      {/* Main Content */}
-      <div className="flex-1 p-6 bg-[#F5F5F5]">
-        <Card className="border-[#D4AF37]">
-          <CardHeader>
-            <CardTitle className="text-[#2C1810]">User Management</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="flex justify-center items-center h-64">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#D4AF37]"></div>
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-[#F5F5F5]">
-                    <TableHead className="text-[#2C1810]">ID</TableHead>
-                    <TableHead className="text-[#2C1810]">Name</TableHead>
-                    <TableHead className="text-[#2C1810]">Email</TableHead>
-                    <TableHead className="text-[#2C1810]">Role</TableHead>
-                    <TableHead className="text-[#2C1810]">Status</TableHead>
-                    <TableHead className="text-[#2C1810]">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {users.map((user) => (
-                    <TableRow key={user.user_id} className="hover:bg-[#F5F5F5]">
-                      <TableCell className="text-[#2C1810]">{user.user_id}</TableCell>
-                      <TableCell className="text-[#2C1810]">{user.fullname}</TableCell>
-                      <TableCell className="text-[#2C1810]">{user.email}</TableCell>
-                      <TableCell className="capitalize text-[#2C1810]">{user.role}</TableCell>
-                      <TableCell className="capitalize text-[#2C1810]">{user.status}</TableCell>
-                      <TableCell className="space-x-2">
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={() => handleEditUser(user.user_id)}
-                          className="text-[#D4AF37] hover:text-[#2C1810] border-[#D4AF37] hover:bg-[#F5F5F5]"
-                        >
-                          <Pencil className="h-5 w-5" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={() => handleDeactivateUser(user.user_id)}
-                          className="text-[#B22222] hover:text-[#8B0000] border-[#B22222] hover:bg-[#F5F5F5]"
-                        >
-                          <Trash2 className="h-5 w-5" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+  if (isLoading) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#D4AF37]"></div>
       </div>
-      <Toaster />
-    </div>
+    );
+  }
+
+  return (
+    <Layout hasSider className="min-h-screen">
+      <Sidebar userRole="admin" userName={user?.fullname} />
+      <Layout>
+        <PageTransition>
+          <Header className="bg-white px-6 flex items-center justify-between">
+            <Title level={4} style={{ margin: 0, color: "#2C1810" }}>
+              User Management
+            </Title>
+          </Header>
+          <Content className="p-6 bg-[#F5F5F5]">
+            <div className="max-w-6xl mx-auto">
+              <Card className="shadow-md border-[#D4AF37] hover:shadow-lg transition-shadow">
+                <Table 
+                  dataSource={users} 
+                  columns={columns} 
+                  rowKey="id"
+                  pagination={{ pageSize: 10 }}
+                  className="custom-table"
+                />
+              </Card>
+            </div>
+          </Content>
+        </PageTransition>
+      </Layout>
+    </Layout>
   );
 };
 

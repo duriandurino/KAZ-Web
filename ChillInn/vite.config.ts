@@ -12,6 +12,8 @@ export default defineConfig({
     },
   },
   server: {
+    host: 'myapp.localhost',
+    port: 5173,
     proxy: {
       '/api': {
         target: 'https://eminent-chalk-lotus.glitch.me', // Your backend server

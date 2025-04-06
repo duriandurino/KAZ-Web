@@ -1,16 +1,14 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { toast } from "sonner";
-import { Toaster } from "@/components/ui/sonner"
+import { Button, Input, Card, Form, Modal, Typography, message, Divider, Layout, Alert } from "antd";
+import { EyeOutlined, EyeInvisibleOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { setToken, removeToken } from "../utils/auth";
 import logo from "./../assets/logo.png";
-import { Eye, EyeOff } from "lucide-react";
+import PageTransition from "../components/PageTransition";
+
+const { Title, Text, Paragraph } = Typography;
+const { Content } = Layout;
 
 interface LoginResponse {
   message: string;
@@ -40,7 +38,8 @@ interface GoogleLoginResponse {
 interface RegisterData {
   email: string;
   password: string;
-  fullname: string;
+  firstname?: string;
+  lastname?: string;
   phone_number: string;
   role: string;
   special_requests?: string;
@@ -48,21 +47,14 @@ interface RegisterData {
 }
 
 const Login = () => {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
-  const [registerData, setRegisterData] = useState<RegisterData>({
-    email: "",
-    password: "",
-    fullname: "",
-    phone_number: "",
-    role: "guest",
-    special_requests: "",
-    access_level: ""
-  });
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [registerError, setRegisterError] = useState<string | null>(null);
+  const [registerForm] = Form.useForm();
+  const [loginForm] = Form.useForm();
   const navigate = useNavigate();
 
   const checkEmailExists = async (email: string): Promise<boolean> => {
@@ -86,39 +78,57 @@ const Login = () => {
     return { isValid: minLength && hasNumber && hasUpperCase, minLength, hasNumber, hasUpperCase };
   };
 
-  const handleRegister = async () => {
+  const handleRegister = async (values: RegisterData) => {
     try {
       setIsLoading(true);
+      setRegisterError(null);
 
-      const errors = [];
-      if (!registerData.email) errors.push("Email is required");
-      if (!registerData.password) {
-        errors.push("Password is required");
-      } else {
-        const { isValid, minLength, hasNumber, hasUpperCase } = validatePassword(registerData.password);
-        if (!isValid) {
-          if (!minLength) errors.push("Password must be at least 8 characters long");
-          if (!hasNumber) errors.push("Password must include at least one number");
-          if (!hasUpperCase) errors.push("Password must include at least one uppercase letter");
-        }
-      }
-      if (!registerData.fullname) errors.push("Full name is required");
-      if (!registerData.phone_number) errors.push("Phone number is required");
-
-      if (errors.length > 0) {
-        errors.forEach(error => toast.error(error));
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(values.email)) {
+        setRegisterError("Please enter a valid email address");
         return;
       }
 
-      const emailExists = await checkEmailExists(registerData.email);
+      // Validate password
+      const { isValid, minLength, hasNumber, hasUpperCase } = validatePassword(values.password);
+      if (!isValid) {
+        const errors = [];
+        if (!minLength) errors.push("at least 8 characters");
+        if (!hasNumber) errors.push("one number");
+        if (!hasUpperCase) errors.push("one uppercase letter");
+        setRegisterError(`Password must contain ${errors.join(", ")}`);
+        return;
+      }
+
+      // Validate phone number
+      const phoneNumber = values.phone_number.replace(/\D/g, '');
+      if (phoneNumber.length !== 10) {
+        setRegisterError("Please enter a valid 10-digit phone number");
+        return;
+      }
+
+      // Check if email already exists
+      const emailExists = await checkEmailExists(values.email);
       if (emailExists) {
-        toast.error(`Email ${registerData.email} is already registered`);
+        setRegisterError(`Email ${values.email} is already registered`);
         return;
       }
+
+      // Format phone number and concatenate names for submission
+      const formattedValues = {
+        ...values,
+        fullname: `${values.firstname} ${values.lastname}`.trim(),
+        phone_number: `+63${phoneNumber}`
+      };
+
+      // Remove firstname and lastname as they're not needed by the API
+      delete formattedValues.firstname;
+      delete formattedValues.lastname;
 
       const response = await axios.post(
         '/api/users/add-user',
-        registerData,
+        formattedValues,
         {
           headers: {
             "x-api-key": import.meta.env.VITE_API_KEY,
@@ -126,30 +136,50 @@ const Login = () => {
         }
       );
 
-      toast.success("Registration successful! Please login.");
-      setShowRegister(false);
-      setEmail(registerData.email);
+      if (response.data) {
+        message.success({
+          content: "Registration successful! Please login.",
+          duration: 3,
+        });
+        setShowRegister(false);
+        loginForm.setFieldsValue({ email: values.email });
+        registerForm.resetFields();
+        setRegisterError(null);
+      }
     } catch (error: any) {
       if (error.response?.data?.message) {
-        toast.error(error.response.data.message);
+        setRegisterError(error.response.data.message);
       } else if (error.message.includes("Network Error")) {
-        toast.error("Unable to connect to server. Please check your internet connection.");
+        setRegisterError("Unable to connect to server. Please check your internet connection.");
       } else {
-        toast.error("Registration failed. Please try again later.");
+        setRegisterError("Registration failed. Please try again later.");
       }
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-
+  const handleLogin = async (values: any) => {
     try {
+      setIsLoading(true);
+      setLoginError(null);
+
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(values.email)) {
+        setLoginError("Please enter a valid email address");
+        return;
+      }
+
+      // Validate password is not empty
+      if (!values.password || values.password.trim() === '') {
+        setLoginError("Please enter your password");
+        return;
+      }
+
       const response = await axios.post<LoginResponse>(
         '/api/users/login',
-        { email, password },
+        { email: values.email, password: values.password },
         {
           headers: {
             'x-api-key': import.meta.env.VITE_API_KEY,
@@ -157,22 +187,37 @@ const Login = () => {
         }
       );
 
-      setToken(response.data.token);
-      toast.success("Login successful!");
+      if (response.data && response.data.token) {
+        setToken(response.data.token);
+        setLoginError(null);
+        message.success({
+          content: "Login successful!",
+          duration: 2,
+        });
 
-      // Convert role to lowercase for consistent comparison
-      const userRole = response.data.user.role.toLowerCase();
-      if (userRole === 'admin') {
-        navigate("/admin/dashboard");
-      } else if (userRole === 'guest') {
-        navigate("/user/dashboard");
+        const userRole = response.data.user.role.toLowerCase();
+        if (userRole === 'admin') {
+          navigate("/admin/dashboard");
+        } else if (userRole === 'guest') {
+          navigate("/user/dashboard");
+        } else {
+          setLoginError("Invalid user role");
+          removeToken();
+        }
       } else {
-        toast.error("Invalid user role");
-        removeToken();
+        setLoginError("Invalid response from server");
       }
     } catch (error: any) {
+      if (error.response?.status === 401) {
+        setLoginError("Invalid email or password");
+      } else if (error.response?.data?.message) {
+        setLoginError(error.response.data.message);
+      } else if (error.message.includes("Network Error")) {
+        setLoginError("Unable to connect to server. Please check your internet connection.");
+      } else {
+        setLoginError("Login failed. Please try again later.");
+      }
       console.error('Login error:', error.response?.data || error.message);
-      toast.error(error.response?.data?.message || "Invalid credentials!");
     } finally {
       setIsLoading(false);
     }
@@ -191,28 +236,29 @@ const Login = () => {
       );
 
       setToken(googleResponse.data.token);
-      toast.success("Login successful!");
+      message.success("Login successful!");
 
-      // Convert role to lowercase for consistent comparison
       const userRole = googleResponse.data.user.role.toLowerCase();
       if (userRole === 'admin') {
         navigate("/admin/dashboard");
       } else if (userRole === 'guest') {
         navigate("/user/dashboard");
       } else {
-        toast.error("Invalid user role");
+        message.error("Invalid user role");
         removeToken();
       }
     } catch (error: any) {
       console.error('Google login error:', error.response?.data || error.message);
-      toast.error(error.response?.data?.message || "Error logging in with Google");
+      message.error(error.response?.data?.message || "Error logging in with Google");
     }
   };
 
   const handlePhoneNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.replace(/\D/g, ''); // Remove non-digits
-    if (value.length <= 10) { // Limit to 10 digits
-      setRegisterData({ ...registerData, phone_number: value ? `+63${value}` : '' });
+    const value = e.target.value;
+    // Only allow numbers
+    const numericValue = value.replace(/[^0-9]/g, '');
+    if (numericValue.length <= 10) {
+      registerForm.setFieldValue('phone_number', numericValue);
     }
   };
 
@@ -270,178 +316,257 @@ const Login = () => {
   }, []);
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-[#F5F5F5] to-[#E8E8E8] w-full">
-      <Card className="w-full max-w-md shadow-lg border-[#D4AF37]">
-        <CardHeader className="space-y-1">
-          <div className="flex justify-center mb-4">
-            <img src={logo} alt="Hotel Logo" className=" h-36 w-auto" />
-          </div>
-          <CardDescription className="text-center text-[#666666]">
-            Sign in to your account to continue
-          </CardDescription>
-        </CardHeader>
-        <form onSubmit={handleLogin}>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email" className="text-[#2C1810]">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="Enter your email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="w-full border-[#D4AF37] focus:ring-[#2C1810]"
-              />
+    <Layout className="min-h-screen relative">
+      {/* Hotel background image */}
+      <div 
+        className="absolute inset-0 z-0 bg-cover bg-center"
+        style={{ 
+          backgroundImage: "url('https://images.unsplash.com/photo-1566073771259-6a8506099945?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=2070&q=80')",
+          filter: "brightness(0.7) contrast(1.1)"
+        }}
+      >
+        {/* Overlay to ensure text readability */}
+        <div className="absolute inset-0 bg-gradient-to-b from-[#2C1810]/70 to-[#1a365d]/70"></div>
+      </div>
+      
+      <PageTransition>
+        <Content className="h-screen flex items-center justify-center p-6 relative z-10">
+          <Card 
+            className="w-full max-w-[400px] shadow-lg bg-white/95 backdrop-blur-sm" 
+            style={{ borderColor: '#D4AF37' }}
+          >
+            <div className="flex justify-center mb-6">
+              <img src={logo} alt="Hotel Logo" className="h-24 w-auto object-contain" />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="password" className="text-[#2C1810]">Password</Label>
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  placeholder="Enter your password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  className="w-full pr-10 border-[#D4AF37] focus:ring-[#2C1810]"
+            <Paragraph className="text-center text-[#666666] mb-6">
+              Sign in to your account to continue
+            </Paragraph>
+            
+            <Form
+              form={loginForm}
+              layout="vertical"
+              onFinish={handleLogin}
+              className="space-y-4"
+            >
+              {loginError && (
+                <Alert
+                  message={loginError}
+                  type="error"
+                  showIcon
+                  className="mb-4"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[#666666] hover:text-[#2C1810]"
-                >
-                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                </button>
-              </div>
-            </div>
-          </CardContent>
-          <CardFooter className="flex flex-col space-y-4 mt-4">
-            <Button 
-              type="submit" 
-              className="w-full bg-[#2C1810] hover:bg-[#3D2317] text-white"
-              disabled={isLoading}
-            >
-              {isLoading ? "Signing in..." : "Sign In"}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full border-[#D4AF37] text-[#2C1810] hover:bg-[#F5F5F5]"
-              onClick={() => setShowRegister(true)}
-            >
-              Create Account
-            </Button>
-            <div className="relative w-full">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t border-[#D4AF37]" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-white px-2 text-[#666666]">Or continue with</span>
-              </div>
-            </div>
-            <div id="googleSignInDiv" className="w-full"></div>
-          </CardFooter>
-        </form>
-      </Card>
+              )}
 
-      <Dialog open={showRegister} onOpenChange={setShowRegister}>
-        <DialogContent className="sm:max-w-md border-[#D4AF37]">
-          <DialogHeader>
-            <DialogTitle className="text-[#2C1810]">Create Account</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="reg-email" className="text-[#2C1810]">Email</Label>
-              <Input
-                id="reg-email"
-                type="email"
-                placeholder="Enter your email"
-                value={registerData.email}
-                onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })}
-                required
-                className="border-[#D4AF37] focus:ring-[#2C1810]"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="reg-password" className="text-[#2C1810]">Password</Label>
-              <div className="relative">
+              <Form.Item
+                label={<Text className="text-[#2C1810] font-medium">Email</Text>}
+                name="email"
+                rules={[{ required: true, message: 'Please input your email!' }]}
+              >
                 <Input
-                  id="reg-password"
-                  type={showRegisterPassword ? "text" : "password"}
+                  placeholder="Enter your email"
+                  size="large"
+                  className="rounded"
+                />
+              </Form.Item>
+              
+              <Form.Item
+                label={<Text className="text-[#2C1810] font-medium">Password</Text>}
+                name="password"
+                rules={[{ required: true, message: 'Please input your password!' }]}
+              >
+                <Input.Password
                   placeholder="Enter your password"
-                  value={registerData.password}
-                  onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })}
-                  required
-                  className="w-full pr-10 border-[#D4AF37] focus:ring-[#2C1810]"
+                  size="large"
+                  className="rounded"
+                  iconRender={(visible) => (visible ? <EyeOutlined /> : <EyeInvisibleOutlined />)}
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowRegisterPassword(!showRegisterPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[#666666] hover:text-[#2C1810]"
+              </Form.Item>
+              
+              <Form.Item className="mb-4">
+                <Button 
+                  type="primary" 
+                  htmlType="submit" 
+                  className="w-full rounded"
+                  size="large"
+                  loading={isLoading}
                 >
-                  {showRegisterPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-                </button>
+                  {isLoading ? "Signing in..." : "Sign In"}
+                </Button>
+              </Form.Item>
+              
+              <Form.Item className="mb-4">
+                <Button
+                  type="default"
+                  className="w-full rounded"
+                  size="large"
+                  onClick={() => {
+                    setShowRegister(true);
+                    setRegisterError(null);
+                  }}
+                >
+                  Create Account
+                </Button>
+              </Form.Item>
+              
+              <Divider>
+                <Text className="text-[#666666]">Or continue with</Text>
+              </Divider>
+              
+              <div id="googleSignInDiv" className="w-full flex justify-center"></div>
+            </Form>
+          </Card>
+        </Content>
+      </PageTransition>
+
+      <Modal
+        title={<Title level={4} style={{ color: '#2C1810', marginBottom: '24px' }}>Create Account</Title>}
+        open={showRegister}
+        onCancel={() => {
+          setShowRegister(false);
+          setRegisterError(null);
+          registerForm.resetFields();
+        }}
+        footer={null}
+        width={400}
+        centered
+        className="rounded-lg"
+      >
+        <Form
+          form={registerForm}
+          layout="vertical"
+          onFinish={handleRegister}
+          initialValues={{
+            role: "guest",
+            access_level: "1"
+          }}
+          className="space-y-4"
+        >
+          {registerError && (
+            <Alert
+              message={registerError}
+              type="error"
+              showIcon
+              className="mb-4"
+            />
+          )}
+
+          <Form.Item
+            label={<Text className="text-[#2C1810] font-medium">Email</Text>}
+            name="email"
+            rules={[{ required: true, message: 'Please input your email!' }]}
+          >
+            <Input
+              placeholder="Enter your email"
+              size="large"
+            />
+          </Form.Item>
+          
+          <Form.Item
+            label={<Text className="text-[#2C1810] font-medium">Password</Text>}
+            name="password"
+            rules={[{ required: true, message: 'Please input your password!' }]}
+          >
+            <Input.Password
+              placeholder="Enter your password"
+              size="large"
+              iconRender={(visible) => (visible ? <EyeOutlined /> : <EyeInvisibleOutlined />)}
+            />
+          </Form.Item>
+          
+          <div className="text-xs text-[#666666] space-y-1 mb-4 bg-[#F5F5F5] p-3 rounded">
+            <p className="font-medium">Password requirements:</p>
+            <ul className="list-disc list-inside pl-2 space-y-1">
+              <li>Minimum 8 characters</li>
+              <li>At least one number</li>
+              <li>At least one uppercase letter</li>
+            </ul>
+          </div>
+          
+          <Form.Item
+            label={<Text className="text-[#2C1810] font-medium">First Name</Text>}
+            name="firstname"
+            rules={[{ required: true, message: 'Please input your first name!' }]}
+          >
+            <Input
+              placeholder="Enter your first name"
+              size="large"
+            />
+          </Form.Item>
+          
+          <Form.Item
+            label={<Text className="text-[#2C1810] font-medium">Last Name</Text>}
+            name="lastname"
+            rules={[{ required: true, message: 'Please input your last name!' }]}
+          >
+            <Input
+              placeholder="Enter your last name"
+              size="large"
+            />
+          </Form.Item>
+          
+          <Form.Item
+            label={<Text className="text-[#2C1810] font-medium">Phone Number</Text>}
+            name="phone_number"
+            rules={[
+              { required: true, message: 'Please input your phone number!' },
+              { min: 10, message: 'Phone number must be 10 digits!' },
+              { pattern: /^[0-9]+$/, message: 'Phone number can only contain numbers!' }
+            ]}
+          >
+            <div className="relative flex items-center">
+              <div className="absolute left-0 top-0 bottom-0 flex items-center justify-center bg-gray-100 text-gray-600 w-12 border-r rounded-l">
+                +63
               </div>
-              <div className="text-xs text-[#666666] space-y-1 mt-1">
-                <p>Password requirements:</p>
-                <ul className="list-disc list-inside pl-2">
-                  <li>Minimum 8 characters</li>
-                  <li>At least one number</li>
-                  <li>At least one uppercase letter</li>
-                </ul>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="fullname" className="text-[#2C1810]">Full Name</Label>
               <Input
-                id="fullname"
-                placeholder="Enter your full name"
-                value={registerData.fullname}
-                onChange={(e) => setRegisterData({ ...registerData, fullname: e.target.value })}
-                required
-                className="border-[#D4AF37] focus:ring-[#2C1810]"
+                type="text"
+                placeholder="9123456789"
+                onChange={handlePhoneNumberChange}
+                className="pl-12"
+                size="large"
+                maxLength={10}
+                onKeyPress={(e) => {
+                  // Allow only number inputs
+                  if (!/[0-9]/.test(e.key)) {
+                    e.preventDefault();
+                  }
+                }}
+                style={{ paddingLeft: '48px' }}
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="phone" className="text-[#2C1810]">Phone Number</Label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-[#666666]">+63</span>
-                <Input
-                  id="phone"
-                  type="tel"
-                  placeholder="9123456789"
-                  value={registerData.phone_number.replace('+63', '')}
-                  onChange={handlePhoneNumberChange}
-                  required
-                  className="border-[#D4AF37] focus:ring-[#2C1810] pl-12"
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="special-requests" className="text-[#2C1810]">Special Requests (Optional)</Label>
-              <Input
-                id="special-requests"
-                placeholder="Any special requests?"
-                value={registerData.special_requests}
-                onChange={(e) => setRegisterData({ ...registerData, special_requests: e.target.value })}
-                className="border-[#D4AF37] focus:ring-[#2C1810]"
-              />
-            </div>
+          </Form.Item>
+          
+          <Form.Item
+            label={<Text className="text-[#2C1810] font-medium">Special Requests (Optional)</Text>}
+            name="special_requests"
+          >
+            <Input
+              placeholder="Any special requests?"
+              size="large"
+            />
+          </Form.Item>
+          
+          <Form.Item name="role" hidden>
+            <Input />
+          </Form.Item>
+          
+          <Form.Item name="access_level" hidden>
+            <Input />
+          </Form.Item>
+          
+          <Form.Item className="mb-0">
             <Button
-              type="button"
-              className="w-full bg-[#2C1810] hover:bg-[#3D2317] text-white"
-              onClick={handleRegister}
-              disabled={isLoading}
+              type="primary"
+              htmlType="submit"
+              className="w-full"
+              size="large"
+              loading={isLoading}
             >
               {isLoading ? "Creating Account..." : "Create Account"}
             </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Toaster />
-    </div>
+          </Form.Item>
+        </Form>
+      </Modal>
+    </Layout>
   );
 };
 
