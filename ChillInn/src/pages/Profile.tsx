@@ -6,7 +6,7 @@ import type { RcFile, UploadFile, UploadProps } from 'antd/es/upload/interface';
 import axios from "axios";
 import Sidebar from "../components/Sidebar";
 import PageTransition from "../components/PageTransition";
-import { uploadFile } from '../lib/appwrite';
+import { uploadProfileImage, getProfileImage } from '../lib/cloudinaryService';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -98,19 +98,11 @@ const Profile = () => {
       // Only try to fetch image if we have a user_id
       if (response.data.user_id) {
         try {
-          const imageResponse = await axios.get(`/api/images`, {
-            headers: {
-              "x-api-key": import.meta.env.VITE_API_KEY,
-              "Authorization": `Bearer ${token}`
-            },
-            params: {
-              guest_id: response.data.user_id,
-              purpose: 'profile'
-            }
-          });
-
-          if (imageResponse.data && imageResponse.data.length > 0 && imageResponse.data[0].image_url) {
-            setImagePreview(imageResponse.data[0].image_url);
+          // Use our new cloudinaryService to get profile image
+          const imageResult = await getProfileImage(response.data.user_id);
+          
+          if (imageResult.imageUrl) {
+            setImagePreview(imageResult.imageUrl);
           }
         } catch (imageError) {
           console.log("No profile image found or error loading image:", imageError);
@@ -206,43 +198,25 @@ const Profile = () => {
     
     try {
       const token = localStorage.getItem('token');
-
-      // Upload to Appwrite using the client
-      const appwriteResponse = await uploadFile(imageFile);
-
-      // Generate a delete hash for the image
-      const deleteHash = crypto.randomUUID();
-
-      // Then save the image record using the images endpoint
-      const imageData = {
-        guest_id: user.user_id,
-        image_purpose: 'profile',
-        image_url: appwriteResponse.url,
-        delete_hash: deleteHash,
-        file_id: appwriteResponse.fileId,
-        width: 0,
-        height: 0
-      };
-
-      const response = await axios.post('/api/images', imageData, {
-        headers: {
-          'x-api-key': import.meta.env.VITE_API_KEY,
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      return appwriteResponse.url;
-    } catch (error: any) {
-      console.error("Image upload error:", error?.message || 'Unknown error occurred');
-      
-      if (error.response?.data?.message) {
-        throw new Error(error.response.data.message);
-      } else if (error.message.includes("Network Error")) {
-        throw new Error("Unable to connect to server. Please check your internet connection.");
-      } else {
-        throw new Error("Failed to upload profile image. Please try again later.");
+      if (!token) {
+        throw new Error("Authentication token not found");
       }
+
+      message.loading({ content: "Uploading image...", key: "imageUpload" });
+      
+      // Use our improved Cloudinary service to upload profile image
+      const imageUrl = await uploadProfileImage(imageFile, user.user_id, token);
+      
+      if (!imageUrl) {
+        throw new Error("Failed to upload image");
+      }
+      
+      message.success({ content: "Image uploaded successfully!", key: "imageUpload" });
+      return imageUrl;
+    } catch (error: any) {
+      message.error({ content: error.message || "Failed to upload image", key: "imageUpload" });
+      console.error("Image upload error:", error);
+      throw error;
     }
   };
 
@@ -280,15 +254,9 @@ const Profile = () => {
       let imageUrl = null;
       if (imageFile) {
         try {
-          message.loading("Uploading profile image...", 0);
           imageUrl = await uploadImage();
-          message.destroy(); // Clear the loading message
-          if (imageUrl) {
-            message.success("Profile image uploaded successfully");
-          }
         } catch (uploadError: any) {
-          message.destroy(); // Clear the loading message
-          setProfileError(uploadError.message);
+          // The error message is already displayed by the uploadImage function
           setIsLoading(false);
           return;
         }
@@ -325,7 +293,7 @@ const Profile = () => {
 
       console.log("Sending update data:", updateData);
 
-      await axios.put(
+      const response = await axios.put(
         `/api/users/update-user`,
         updateData,
         {
@@ -349,6 +317,7 @@ const Profile = () => {
       } else {
         setProfileError("Error updating profile. Please try again later.");
       }
+      console.error("Error updating profile:", error);
     } finally {
       setIsLoading(false);
     }

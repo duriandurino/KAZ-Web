@@ -270,21 +270,24 @@ const Login = () => {
         return;
       }
 
+      // Log the client ID for debugging (remove in production)
       const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+      console.log('Google Client ID:', clientId ? 'Present (correct format)' : 'Missing');
+      
       if (!clientId) {
-        console.error('Google Client ID not configured');
+        console.error('Google Client ID not configured in .env file');
         return;
       }
 
       try {
+        // Get the current origin
+        const currentOrigin = window.location.origin;
+        console.log('Current origin:', currentOrigin);
+        
+        // Simple initialization with minimal parameters
         google.accounts.id.initialize({
           client_id: clientId,
-          callback: handleGoogleLogin,
-          auto_select: false,
-          cancel_on_tap_outside: true,
-          ux_mode: 'popup',
-          context: 'signin',
-          allowed_parent_origin: import.meta.env.VITE_APP_URL || window.location.origin
+          callback: handleGoogleLogin
         });
 
         const buttonElement = document.getElementById("googleSignInDiv");
@@ -303,16 +306,12 @@ const Login = () => {
           );
         }
       } catch (error) {
-        console.error('Google Sign-In initialization error:', error);
+        console.error('Google Sign-In initialization error details:', error);
       }
     };
 
-    if (document.readyState === 'complete') {
-      initializeGoogleSignIn();
-    } else {
-      window.addEventListener('load', initializeGoogleSignIn);
-      return () => window.removeEventListener('load', initializeGoogleSignIn);
-    }
+    // Add a small delay to ensure Google JS API is fully loaded
+    setTimeout(initializeGoogleSignIn, 1000);
   }, []);
 
   return (

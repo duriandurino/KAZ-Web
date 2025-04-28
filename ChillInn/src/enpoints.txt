@@ -708,97 +708,10 @@ app.put('/room/updateroombyid', validateApiKey, authenticateToken, async (req, r
 });
 //Room Related^
 //Image Related
-// Image Endpoints
-// POST - Create image metadata
-app.post('/api/images', validateImageData, (req, res) => {
-  const { guest_id, room_id, image_purpose, image_url, delete_hash, file_id, width, height } = req.body;
-  
-  const sql = `
-    INSERT INTO Image 
-    (guest_id, room_id, image_purpose, image_url, delete_hash, file_id, width, height, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-  `;
-
-  db.run(sql, [guest_id, room_id, image_purpose, image_url, delete_hash, file_id, width, height], function(err) {
-    if (err) return res.status(500).json({ error: err.message });
-    res.status(201).json({ 
-      image_id: this.lastID,
-      message: 'Image created successfully'
-    });
-  });
-});
-
-// GET - Get all images (with optional filters)
-app.get('/api/images', (req, res) => {
-  const { guest_id, room_id, purpose } = req.query;
-  let sql = 'SELECT * FROM Image WHERE 1=1';
-  const params = [];
-
-  if (guest_id) { sql += ' AND guest_id = ?'; params.push(guest_id); }
-  if (room_id) { sql += ' AND room_id = ?'; params.push(room_id); }
-  if (purpose) { sql += ' AND image_purpose = ?'; params.push(purpose); }
-
-  db.all(sql, params, (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
-  });
-});
-
-// GET - Get single image by ID
-app.get('/api/images/:id', (req, res) => {
-  db.get('SELECT * FROM Image WHERE image_id = ?', [req.params.id], (err, row) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!row) return res.status(404).json({ error: 'Image not found' });
-    res.json(row);
-  });
-});
-
-// PUT - Update image metadata
-app.put('/api/images/:id', (req, res) => {
-  const updates = [];
-  const params = [];
-  const allowedFields = ['guest_id', 'room_id', 'image_purpose', 'image_url', 'delete_hash', 'file_id', 'width', 'height'];
-
-  allowedFields.forEach(field => {
-    if (req.body[field] !== undefined) {
-      updates.push(`${field} = ?`);
-      params.push(req.body[field]);
-    }
-  });
-
-  if (updates.length === 0) return res.status(400).json({ error: 'No valid fields to update' });
-  
-  params.push(req.params.id);
-  const sql = `UPDATE Image SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE image_id = ?`;
-
-  db.run(sql, params, function(err) {
-    if (err) return res.status(500).json({ error: err.message });
-    if (this.changes === 0) return res.status(404).json({ error: 'Image not found' });
-    res.json({ message: 'Image updated successfully' });
-  });
-});
-
-// DELETE - Delete image
-app.delete('/api/images/:id', (req, res) => {
-  const { delete_hash } = req.body;
-  if (!delete_hash) return res.status(400).json({ error: 'delete_hash is required' });
-
-  db.get('SELECT delete_hash FROM Image WHERE image_id = ?', [req.params.id], (err, row) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!row) return res.status(404).json({ error: 'Image not found' });
-    if (row.delete_hash !== delete_hash) return res.status(403).json({ error: 'Invalid delete_hash' });
-
-    db.run('DELETE FROM Image WHERE image_id = ?', [req.params.id], (err) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ message: 'Image deleted successfully' });
-    });
-  });
-});
-
-// Validation middleware
+// Updated validation middleware for Cloudinary with ml_default preset
 function validateImageData(req, res, next) {
-  const required = ['image_purpose', 'image_url', 'delete_hash'];
-  const allowedPurposes = ['profile', 'room_preview', 'amenity'];
+  const required = ['image_purpose', 'image_url']; // simplified required fields
+  const allowedPurposes = ['profile', 'room_preview', 'room_thumbnail', 'amenity'];
   
   if (!required.every(field => req.body[field])) {
     return res.status(400).json({ error: 'Missing required fields' });
@@ -814,3 +727,78 @@ function validateImageData(req, res, next) {
 
   next();
 }
+
+// POST - Create image metadata (updated for Cloudinary with ml_default preset)
+app.post('/api/images', validateApiKey, validateImageData, (req, res) => {
+  const { 
+    guest_id, 
+    room_id, 
+    image_purpose, 
+    image_url, 
+    delete_hash, // Keep for backward compatibility
+    cloudinary_public_id, // From Cloudinary response
+    cloudinary_version,   // From Cloudinary response
+    cloudinary_signature, // From Cloudinary response
+    width, 
+    height 
+  } = req.body;
+  
+  // Extract the public_id from the URL if not provided
+  // Expected URL format: https://res.cloudinary.com/[cloud_name]/image/upload/v[version]/[public_id].[extension]
+  let public_id = cloudinary_public_id;
+  if (!public_id && image_url) {
+    try {
+      const urlParts = image_url.split('/');
+      // Get the filename including extension
+      const filename = urlParts[urlParts.length - 1];
+      // Remove the extension
+      public_id = filename.substring(0, filename.lastIndexOf('.'));
+      // Check if there's a version prefix (v1234567890/)
+      if (public_id.includes('/')) {
+        public_id = public_id.split('/').pop();
+      }
+    } catch (e) {
+      console.error('Error extracting public_id from URL:', e);
+    }
+  }
+  
+  const sql = `
+    INSERT INTO Image 
+    (guest_id, room_id, image_purpose, image_url, delete_hash, file_id, 
+     cloudinary_public_id, cloudinary_version, cloudinary_signature,
+     width, height, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+  `;
+
+  db.run(sql, [
+    guest_id, room_id, image_purpose, image_url, delete_hash, public_id, // file_id = public_id for compatibility
+    public_id, cloudinary_version, cloudinary_signature,
+    width, height
+  ], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ 
+      image_id: this.lastID,
+      message: 'Image created successfully',
+      cloudinary_public_id: public_id
+    });
+  });
+});
+
+// DELETE - Delete image record (note: doesn't delete from Cloudinary)
+app.delete('/api/images/:id', validateApiKey, (req, res) => {
+  // Simplified - no need to check delete_hash with Cloudinary
+  db.get('SELECT cloudinary_public_id FROM Image WHERE image_id = ?', [req.params.id], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!row) return res.status(404).json({ error: 'Image not found' });
+    
+    // Delete from database only
+    db.run('DELETE FROM Image WHERE image_id = ?', [req.params.id], (err) => {
+      if (err) return res.status(500).json({ error: err.message });
+      
+      res.json({ 
+        message: 'Image record deleted successfully',
+        note: 'Image still exists in Cloudinary. Must use Cloudinary Dashboard or Admin API to delete the actual image.'
+      });
+    });
+  });
+});

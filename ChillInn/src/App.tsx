@@ -6,6 +6,7 @@ import UserManagement from "./pages/UserManagement";
 import RoomManagement from "./pages/RoomManagement";
 import Profile from "./pages/Profile";
 import Bookings from "./pages/Bookings";
+import MyBookings from "./pages/MyBookings";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Settings from "./pages/Settings";
 import RoomDetails from "./pages/RoomDetails";
@@ -19,13 +20,14 @@ function App() {
           <Route path="/admin/dashboard" element={<AdminDashboard />} />
           <Route path="/admin/user-management" element={<UserManagement />} />
           <Route path="/admin/room-management" element={<RoomManagement />} />
+          <Route path="/admin/bookings" element={<Bookings />} />
         </Route>
         <Route element={<ProtectedRoute allowedRoles={["guest", "admin"]} />}>
           <Route path="/user/dashboard" element={<UserDashboard />} />
           <Route path="/user/profile" element={<Profile />} />
-          <Route path="/user/bookings" element={<Bookings />} />
+          <Route path="/user/bookings" element={<MyBookings />} />
           <Route path="/user/settings" element={<Settings />} />
-          <Route path="/room/:id" element={<RoomDetails />} />
+          <Route path="/user/room/:id" element={<RoomDetails />} />
         </Route>
       </Routes>
     </Router>

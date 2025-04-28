@@ -7,6 +7,8 @@ import { removeToken } from "../utils/auth";
 import Sidebar from "../components/Sidebar";
 import PageTransition from "../components/PageTransition";
 import type { UploadFile } from "antd/es/upload/interface";
+import { uploadToCloudinary } from '../lib/cloudinaryService';
+import CachedImage from '../components/CachedImage';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -125,24 +127,33 @@ const RoomManagement = () => {
 
   const handleAddRoom = async (values: any) => {
     try {
-      const formData = new FormData();
-      fileList.forEach((file) => {
-        if (file.originFileObj) {
-          formData.append("images", file.originFileObj);
-        }
-      });
+      // Upload each image to Cloudinary and collect the URLs
+      const imageUrls = [];
+      const imageIds = [];
       
-      Object.keys(values).forEach(key => {
-        formData.append(key, values[key]);
-      });
+      for (const file of fileList) {
+        if (file.originFileObj) {
+          const uploadResult = await uploadToCloudinary(file.originFileObj);
+          imageUrls.push(uploadResult.secure_url);
+          imageIds.push(uploadResult.public_id);
+        }
+      }
+      
+      // Create room data with image URLs
+      const roomData = {
+        ...values,
+        images: imageUrls,
+        image_ids: imageIds
+      };
 
+      // Send to your backend API
       await axios.post(
         "/api/room/add-room",
-        formData,
+        roomData,
         {
           headers: {
             "x-api-key": import.meta.env.VITE_API_KEY,
-            "Content-Type": "multipart/form-data",
+            "Content-Type": "application/json",
           },
         }
       );
@@ -176,25 +187,44 @@ const RoomManagement = () => {
   };
 
   const handleUploadImage = async (roomId: number, file: File, type: 'thumbnail' | 'preview') => {
-    const formData = new FormData();
-    formData.append('image', file);
-    formData.append('room_id', roomId.toString());
-
     try {
-      const endpoint = type === 'thumbnail' 
-        ? '/api/image/upload/thumbnail'
-        : '/api/image/upload/room-preview';
+      const token = localStorage.getItem("token");
+      if (!token) {
+        message.error("You must be logged in to upload images");
+        return;
+      }
+
+      // Upload to Cloudinary
+      const uploadResult = await uploadToCloudinary(file);
       
-      await axios.post(endpoint, formData, {
+      // Save image metadata to the appropriate endpoint
+      const endpoint = type === 'thumbnail' 
+        ? '/api/images/room-thumbnail'
+        : '/api/images/room-preview';
+      
+      // Prepare image data to save in your database
+      const imageData = {
+        room_id: roomId,
+        image_url: uploadResult.secure_url,
+        cloudinary_public_id: uploadResult.public_id,
+        cloudinary_version: uploadResult.version,
+        cloudinary_signature: uploadResult.signature,
+        width: uploadResult.width,
+        height: uploadResult.height
+      };
+      
+      // Save image metadata in your database
+      await axios.post(endpoint, imageData, {
         headers: {
           "x-api-key": import.meta.env.VITE_API_KEY,
-          "Content-Type": "multipart/form-data",
-        },
+          "Authorization": `Bearer ${token}`
+        }
       });
+      
       message.success(`${type === 'thumbnail' ? 'Thumbnail' : 'Preview'} uploaded successfully!`);
       fetchRooms();
-    } catch (error) {
-      message.error(`Error uploading ${type}!`);
+    } catch (error: any) {
+      message.error(`Error uploading ${type}: ${error.message}`);
     }
   };
 

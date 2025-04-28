@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Layout, Card, Typography, Button, Descriptions, Tag, Carousel, Row, Col, Divider, List, DatePicker, message } from 'antd';
+import { Layout, Card, Typography, Button, Descriptions, Tag, Carousel, Row, Col, Divider, List, message, Modal } from 'antd';
 import { 
   WifiOutlined, 
   CoffeeOutlined, 
@@ -9,15 +9,16 @@ import {
   CarOutlined,
   SafetyOutlined,
   UserOutlined,
-  CheckCircleOutlined
+  CheckCircleOutlined,
+  HeartOutlined
 } from '@ant-design/icons';
 import Sidebar from '../components/Sidebar';
 import PageTransition from '../components/PageTransition';
-import type { Dayjs } from 'dayjs';
+import BookingForm from '../components/BookingForm';
+import CachedImage from '../components/CachedImage';
 
 const { Content } = Layout;
 const { Title, Text, Paragraph } = Typography;
-const { RangePicker } = DatePicker;
 
 interface Amenity {
   amenity_id: number;
@@ -49,7 +50,8 @@ const RoomDetails = () => {
   const navigate = useNavigate();
   const [room, setRoom] = useState<Room | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedDates, setSelectedDates] = useState<[Dayjs | null, Dayjs | null] | null>(null);
+  const [isBookingModalVisible, setIsBookingModalVisible] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     // Simulate API call to fetch room details
@@ -85,13 +87,18 @@ const RoomDetails = () => {
     }, 1000);
   }, [id]);
 
-  const handleBooking = () => {
-    if (!selectedDates) {
-      message.warning('Please select check-in and check-out dates');
-      return;
-    }
-    message.success('Proceeding to booking...');
-    // Implement booking logic
+  const handleBookNow = () => {
+    setIsBookingModalVisible(true);
+  };
+
+  const handleSaveRoom = () => {
+    setSaved(!saved);
+    message.success(saved ? 'Removed from saved rooms' : 'Added to saved rooms');
+  };
+
+  const handleBookingSuccess = () => {
+    setIsBookingModalVisible(false);
+    // Any additional actions after successful booking
   };
 
   if (loading || !room) {
@@ -114,10 +121,12 @@ const RoomDetails = () => {
                 <Carousel autoplay className="mb-8">
                   {room.images.map((image, index) => (
                     <div key={index} className="h-[400px]">
-                      <img
+                      <CachedImage
                         src={image}
-                        alt={`Room view ${index + 1}`}
+                        alt={`Room Preview ${index + 1}`}
                         className="w-full h-full object-cover rounded"
+                        lazy={true}
+                        preload={index < 2} // Preload first two images
                       />
                     </div>
                   ))}
@@ -127,17 +136,28 @@ const RoomDetails = () => {
                   {/* Room Details */}
                   <Col xs={24} lg={16}>
                     <div className="space-y-6">
-                      <div>
-                        <Title level={2}>{room.room_type.name}</Title>
-                        <div className="flex items-center gap-4 mb-4">
-                          <Tag color="green">{room.status}</Tag>
-                          <Text type="secondary">
-                            <UserOutlined /> Up to {room.room_type.capacity} guests
-                          </Text>
-                          <Text type="secondary">Room {room.room_number}</Text>
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <Title level={2}>{room.room_type.name}</Title>
+                          <div className="flex items-center gap-4 mb-4">
+                            <Tag color="green">{room.status}</Tag>
+                            <Text type="secondary">
+                              <UserOutlined /> Up to {room.room_type.capacity} guests
+                            </Text>
+                            <Text type="secondary">Room {room.room_number}</Text>
+                          </div>
                         </div>
-                        <Paragraph>{room.description}</Paragraph>
+                        <Button 
+                          icon={saved ? <HeartOutlined style={{ color: '#D4AF37' }} /> : <HeartOutlined />} 
+                          size="large"
+                          onClick={handleSaveRoom}
+                          className={saved ? "border-[#D4AF37] text-[#D4AF37]" : ""}
+                        >
+                          {saved ? "Saved" : "Save"}
+                        </Button>
                       </div>
+                      
+                      <Paragraph>{room.description}</Paragraph>
 
                       <Divider />
 
@@ -203,19 +223,18 @@ const RoomDetails = () => {
 
                         <Divider />
 
-                        <div>
-                          <Text strong className="block mb-2">Select Dates</Text>
-                          <RangePicker
-                            className="w-full"
-                            onChange={(dates) => setSelectedDates(dates)}
-                          />
+                        <div className="mt-4">
+                          <Text>
+                            <UserOutlined className="mr-2" />
+                            Up to {room.room_type.capacity} guests
+                          </Text>
                         </div>
 
                         <Button
                           type="primary"
                           size="large"
                           className="w-full bg-[#2C1810] hover:bg-[#3D2317]"
-                          onClick={handleBooking}
+                          onClick={handleBookNow}
                         >
                           Book Now
                         </Button>
@@ -234,6 +253,26 @@ const RoomDetails = () => {
           </Content>
         </PageTransition>
       </Layout>
+
+      {/* Booking Modal */}
+      <Modal
+        title={<Title level={4} className="m-0">Book Your Stay</Title>}
+        open={isBookingModalVisible}
+        onCancel={() => setIsBookingModalVisible(false)}
+        footer={null}
+        width={800}
+        centered
+      >
+        <BookingForm
+          roomId={room.room_id}
+          roomName={room.room_type.name}
+          roomType={room.room_type.name}
+          pricePerNight={room.room_type.price}
+          maxGuests={room.room_type.capacity}
+          onSuccess={handleBookingSuccess}
+          onCancel={() => setIsBookingModalVisible(false)}
+        />
+      </Modal>
     </Layout>
   );
 };

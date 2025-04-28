@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { ConfigProvider, theme } from 'antd'
 import './index.css'
 import App from './App.tsx'
+import { SidebarProvider } from './components/SidebarContext.tsx'
 
 const { defaultAlgorithm } = theme;
 
@@ -64,7 +65,9 @@ createRoot(document.getElementById('root')!).render(
         },
       }}
     >
-      <App />
+      <SidebarProvider>
+        <App />
+      </SidebarProvider>
     </ConfigProvider>
   </StrictMode>,
 )
