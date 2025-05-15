@@ -3,13 +3,15 @@ import { Form, DatePicker, InputNumber, Button, Divider, Row, Col, Card, Typogra
 import { CheckCircleOutlined, CreditCardOutlined, UserOutlined } from '@ant-design/icons';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
+import { createBooking } from '../lib/bookingService';
+import axios from 'axios';
 
 const { Title, Text, Paragraph } = Typography;
 const { RangePicker } = DatePicker;
 const { Step } = Steps;
 
 interface BookingFormProps {
-  roomId: number;
+  roomId: number | string;
   roomName: string;
   roomType: string;
   pricePerNight: number;
@@ -85,22 +87,82 @@ const BookingForm: React.FC<BookingFormProps> = ({
     });
   };
 
-  const handlePaymentSubmit = () => {
+  const handlePaymentSubmit = async () => {
     setLoading(true);
     
-    // Simulating API call for booking
-    setTimeout(() => {
-      // In a real application, you would make an API call here
-      // For now, we'll just simulate a successful booking
-      setBookingId(Math.floor(Math.random() * 10000));
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        message.error('Authentication required. Please login again.');
+        return;
+      }
+      
+      if (!bookingDetails.checkIn || !bookingDetails.checkOut) {
+        message.error('Please select valid dates');
+        setLoading(false);
+        return;
+      }
+      
+      // Display loading message
+      message.loading({ content: 'Creating your booking...', key: 'bookingMessage' });
+      
+      // Prepare booking data
+      const bookingData = {
+        room_id: roomId,
+        check_in: bookingDetails.checkIn.format('YYYY-MM-DD'),
+        check_out: bookingDetails.checkOut.format('YYYY-MM-DD'),
+        guests: bookingDetails.guests,
+        total_price: bookingDetails.totalPrice,
+        payment_method: 'Pay on Arrival',
+        special_requests: ''
+      };
+      
+      console.log('Sending booking data:', bookingData);
+      
+      // Call the API to create the booking
+      const response = await createBooking(bookingData, token);
+      console.log('Booking created successfully:', response);
+      
+      // Success message
+      message.success({ content: 'Booking created successfully!', key: 'bookingMessage', duration: 2 });
+      
+      setBookingId(response.booking_id);
       setCurrentStep(2);
-      setLoading(false);
       
       // Notify parent component of success
       if (onSuccess) {
         onSuccess();
       }
-    }, 1500);
+    } catch (error) {
+      console.error('Error creating booking:', error);
+      
+      // Show a more descriptive error message
+      let errorMessage = 'Failed to create booking. Please try again.';
+      
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        
+        if (status === 404) {
+          errorMessage = 'Booking service is currently unavailable. Please try again later.';
+        } else if (status === 400) {
+          errorMessage = error.response?.data?.message || 'Invalid booking information. Please check your details.';
+        } else if (status === 401 || status === 403) {
+          errorMessage = 'Authentication error. Please log in again.';
+        } else if (status === 500) {
+          errorMessage = 'Server error. Our team has been notified.';
+        }
+        
+        console.error('API Error details:', {
+          status: error.response?.status,
+          data: error.response?.data,
+          url: error.config?.url
+        });
+      }
+      
+      message.error({ content: errorMessage, key: 'bookingMessage', duration: 4 });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const renderBookingDetails = () => (
@@ -167,6 +229,7 @@ const BookingForm: React.FC<BookingFormProps> = ({
         size="large"
         className="w-full mt-6 bg-[#2C1810] hover:bg-[#3D2317]"
         onClick={handleDetailsSubmit}
+        style={{ marginTop: '1em' }}
         disabled={!bookingDetails.checkIn || !bookingDetails.checkOut}
       >
         Continue to Payment
@@ -228,7 +291,7 @@ const BookingForm: React.FC<BookingFormProps> = ({
         </Row>
       </Card>
       
-      <Row gutter={16}>
+      <Row gutter={16} style={{ marginTop: '1em' }}>
         <Col span={12}>
           <Button 
             size="large" 
@@ -264,13 +327,13 @@ const BookingForm: React.FC<BookingFormProps> = ({
           type="primary" 
           key="view-booking" 
           className="bg-[#2C1810] hover:bg-[#3D2317]"
-          onClick={() => window.location.href = '/bookings'}
+          onClick={() => window.location.href = '/user/bookings'}
         >
           View My Bookings
         </Button>,
         <Button 
           key="dashboard" 
-          onClick={() => window.location.href = '/dashboard'}
+          onClick={() => window.location.href = '/user/dashboard'}
         >
           Back to Dashboard
         </Button>,

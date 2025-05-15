@@ -5,7 +5,9 @@ import { EyeOutlined, EyeInvisibleOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { setToken, removeToken } from "../utils/auth";
 import logo from "./../assets/logo.png";
+import background from "./../assets/background.png";
 import PageTransition from "../components/PageTransition";
+import '../darkMode.css';
 
 const { Title, Text, Paragraph } = Typography;
 const { Content } = Layout;
@@ -188,7 +190,7 @@ const Login = () => {
       );
 
       if (response.data && response.data.token) {
-        setToken(response.data.token);
+      setToken(response.data.token);
         setLoginError(null);
         message.success({
           content: "Login successful!",
@@ -263,6 +265,14 @@ const Login = () => {
   };
 
   useEffect(() => {
+    // Set the background image as a CSS variable for easier override protection
+    document.documentElement.style.setProperty('--login-bg-image', `url(${background})`);
+    
+    // Preload the background image to ensure it's loaded before rendering
+    const img = new Image();
+    img.src = background;
+    
+    // Existing Google Sign-In initialization
     const initializeGoogleSignIn = () => {
       const google = (window as any).google;
       if (!google) {
@@ -312,18 +322,18 @@ const Login = () => {
 
     // Add a small delay to ensure Google JS API is fully loaded
     setTimeout(initializeGoogleSignIn, 1000);
+    
+    // Cleanup function
+    return () => {
+      // Remove the CSS variable when component unmounts
+      document.documentElement.style.removeProperty('--login-bg-image');
+    };
   }, []);
 
   return (
-    <Layout className="min-h-screen relative">
-      {/* Hotel background image */}
-      <div 
-        className="absolute inset-0 z-0 bg-cover bg-center"
-        style={{ 
-          backgroundImage: "url('https://images.unsplash.com/photo-1566073771259-6a8506099945?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=2070&q=80')",
-          filter: "brightness(0.7) contrast(1.1)"
-        }}
-      >
+    <Layout className="min-h-screen relative overflow-hidden login-layout">
+      {/* Hotel background image - with special class for dark mode protection */}
+      <div className="absolute inset-0 w-full h-full login-page-bg">
         {/* Overlay to ensure text readability */}
         <div className="absolute inset-0 bg-gradient-to-b from-[#2C1810]/70 to-[#1a365d]/70"></div>
       </div>
@@ -332,7 +342,7 @@ const Login = () => {
         <Content className="h-screen flex items-center justify-center p-6 relative z-10">
           <Card 
             className="w-full max-w-[400px] shadow-lg bg-white/95 backdrop-blur-sm" 
-            style={{ borderColor: '#D4AF37' }}
+            style={{ borderColor: '#D4AF37', position: 'relative' }}
           >
             <div className="flex justify-center mb-6">
               <img src={logo} alt="Hotel Logo" className="h-24 w-auto object-contain" />
@@ -385,7 +395,7 @@ const Login = () => {
                 <Button 
                   type="primary" 
                   htmlType="submit" 
-                  className="w-full rounded"
+                  className="w-full rounded text-on-dark"
                   size="large"
                   loading={isLoading}
                 >
@@ -513,7 +523,7 @@ const Login = () => {
             ]}
           >
             <div className="relative flex items-center">
-              <div className="absolute left-0 top-0 bottom-0 flex items-center justify-center bg-gray-100 text-gray-600 w-12 border-r rounded-l">
+              <div className="absolute left-0 top-0 bottom-0 flex items-center justify-center bg-gray-100 text-gray-600 w-12 border-r rounded-l z-[1]">
                 +63
               </div>
               <Input
@@ -530,8 +540,8 @@ const Login = () => {
                   }
                 }}
                 style={{ paddingLeft: '48px' }}
-              />
-            </div>
+            />
+          </div>
           </Form.Item>
           
           <Form.Item
@@ -561,7 +571,7 @@ const Login = () => {
               loading={isLoading}
             >
               {isLoading ? "Creating Account..." : "Create Account"}
-            </Button>
+          </Button>
           </Form.Item>
         </Form>
       </Modal>

@@ -4,69 +4,72 @@ import { ConfigProvider, theme } from 'antd'
 import './index.css'
 import App from './App.tsx'
 import { SidebarProvider } from './components/SidebarContext.tsx'
+import './utils/darkModeInit';
 
-const { defaultAlgorithm } = theme;
+const { defaultAlgorithm, darkAlgorithm } = theme;
+
+const isDarkMode = localStorage.getItem('darkMode') === 'true';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ConfigProvider
       theme={{
-        algorithm: [defaultAlgorithm],
+        algorithm: isDarkMode ? [darkAlgorithm] : [defaultAlgorithm],
         token: {
           colorPrimary: '#D4AF37',
-          colorBgContainer: '#FFFFFF',
-          colorBgElevated: '#FFFFFF',
-          colorBgLayout: '#F5F5F5',
-          colorText: '#2C1810',
-          colorTextSecondary: '#3D2317',
+          colorBgContainer: isDarkMode ? '#1e1e1e' : '#FFFFFF',
+          colorBgElevated: isDarkMode ? '#1e1e1e' : '#FFFFFF',
+          colorBgLayout: isDarkMode ? '#121212' : '#F5F5F5',
+          colorText: isDarkMode ? '#FFFFFF' : '#2C1810',
+          colorTextSecondary: isDarkMode ? '#CCCCCC' : '#3D2317',
           borderRadius: 6,
-          colorBorder: '#D4AF37',
+          colorBorder: isDarkMode ? '#444444' : '#D9D9D9',
           colorPrimaryHover: '#3D2317',
-          colorError: '#8B2E19',
-          colorErrorHover: '#A13D26',
+          colorError: '#ff4d4f',
+          colorErrorHover: '#ff7875',
           colorLink: '#D4AF37',
         },
         components: {
           Layout: {
-            headerBg: '#FFFFFF',
-            siderBg: '#2C1810',
-            headerColor: '#2C1810',
+            headerBg: isDarkMode ? '#1e1e1e' : '#FFFFFF',
+            siderBg: isDarkMode ? '#000000' : '#2C1810',
+            headerColor: isDarkMode ? '#FFFFFF' : '#2C1810',
           },
           Menu: {
-            darkItemBg: '#2C1810',
-            darkItemSelectedBg: '#3D2317',
-            darkItemHoverBg: '#3D2317',
+            darkItemBg: isDarkMode ? '#000000' : '#2C1810',
+            darkItemSelectedBg: isDarkMode ? '#1f1f1f' : '#3D2317',
+            darkItemHoverBg: isDarkMode ? '#1f1f1f' : '#3D2317',
             darkItemColor: '#FFFFFF',
             darkItemSelectedColor: '#D4AF37',
             darkItemHoverColor: '#D4AF37',
           },
           Button: {
             colorPrimary: '#D4AF37',
-            defaultColor: '#2C1810',
-            defaultBorderColor: '#D4AF37',
+            defaultColor: isDarkMode ? '#FFFFFF' : '#2C1810',
+            defaultBorderColor: isDarkMode ? '#444444' : '#D4AF37',
           },
           Card: {
-            colorBgContainer: '#FFFFFF',
-            colorBorderSecondary: '#D4AF37',
-            colorText: '#2C1810',
-            colorTextHeading: '#D4AF37',
+            colorBgContainer: isDarkMode ? '#1e1e1e' : '#FFFFFF',
+            colorBorderSecondary: isDarkMode ? '#444444' : '#D4AF37',
+            colorText: isDarkMode ? '#FFFFFF' : '#2C1810',
+            colorTextHeading: isDarkMode ? '#FFFFFF' : '#D4AF37',
           },
           Typography: {
-            colorText: '#2C1810',
-            colorTextSecondary: '#3D2317',
-            colorTextHeading: '#D4AF37',
+            colorText: isDarkMode ? '#FFFFFF' : '#2C1810',
+            colorTextSecondary: isDarkMode ? '#CCCCCC' : '#3D2317',
+            colorTextHeading: isDarkMode ? '#FFFFFF' : '#D4AF37',
           },
           Input: {
-            colorBgContainer: '#FFFFFF',
-            colorBorder: '#D4AF37',
-            colorText: '#2C1810',
-            colorTextPlaceholder: '#8B7355',
+            colorBgContainer: isDarkMode ? '#1e1e1e' : '#FFFFFF',
+            colorBorder: isDarkMode ? '#444444' : '#D9D9D9',
+            colorText: isDarkMode ? '#FFFFFF' : '#2C1810',
+            colorTextPlaceholder: isDarkMode ? '#888888' : '#8B7355',
           }
         },
       }}
     >
       <SidebarProvider>
-        <App />
+    <App />
       </SidebarProvider>
     </ConfigProvider>
   </StrictMode>,

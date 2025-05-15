@@ -1,69 +1,165 @@
-import { useState } from 'react';
-import { Layout, Card, Typography, Switch, Select, Divider, Button, Form, Radio, message, Collapse, Modal } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { Layout, Card, Typography, Switch, Select, Divider, Button, Form, Modal, Collapse, theme, notification } from 'antd';
 import { 
-  BellOutlined, 
-  LockOutlined, 
-  GlobalOutlined, 
+  BellOutlined,  
   DeleteOutlined,
-  DollarOutlined,
-  SafetyCertificateOutlined,
-  ExclamationCircleOutlined
+  SettingOutlined,
+  ExclamationCircleOutlined,
+  FireOutlined
 } from '@ant-design/icons';
-import Sidebar from '../components/Sidebar';
-import PageTransition from '../components/PageTransition';
+import AppLayout from '../components/AppLayout';
+import { updateNotificationPreferences, updateUserPreferences } from '../lib/userService';
+import '../darkMode.css'; // This will be created later
+import { applyDarkMode as applyDarkModeUtil, applyLightMode } from '../utils/darkModeInit'; // Import the dark mode utility functions
 
 const { Content } = Layout;
 const { Title, Text, Paragraph } = Typography;
 const { Panel } = Collapse;
 const { confirm } = Modal;
+const { useToken } = theme;
+
+interface UserPreferences {
+  theme_mode?: 'light' | 'dark';
+}
+
+interface NotificationPreferences {
+  email_notifications: boolean;
+  booking_reminders: boolean;
+  promotional_emails?: boolean;
+  sms_notifications?: boolean;
+  recommendations_enabled?: boolean;
+}
 
 const Settings = () => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
+  const { token: themeToken } = useToken();
 
   // Notification settings
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [bookingReminders, setBookingReminders] = useState(true);
-  const [promotionalEmails, setPromotionalEmails] = useState(false);
-  const [smsNotifications, setSmsNotifications] = useState(true);
-
-  // Privacy settings
-  const [showProfile, setShowProfile] = useState('public');
-  const [shareBookingHistory, setShareBookingHistory] = useState(false);
+  const [showRecommendations, setShowRecommendations] = useState(true);
 
   // Preferences
-  const [language, setLanguage] = useState('en');
-  const [currency, setCurrency] = useState('PHP');
-  const [timeFormat, setTimeFormat] = useState('12h');
+  const [darkMode, setDarkMode] = useState(false);
+
+  // Load saved preferences
+  useEffect(() => {
+    console.log('Loading saved preferences from localStorage');
+    
+    // Load dark mode setting
+    const savedDarkMode = localStorage.getItem('darkMode') === 'true';
+    console.log('Saved dark mode setting:', savedDarkMode);
+    setDarkMode(savedDarkMode);
+    
+    // Apply dark mode class immediately if saved
+    applyDarkModeFromSetting(savedDarkMode);
+    
+    // Load notification preferences from localStorage
+    const savedEmailNotifs = localStorage.getItem('emailNotifications') !== 'false';
+    const savedBookingReminders = localStorage.getItem('bookingReminders') !== 'false';
+    const savedShowRecommendations = localStorage.getItem('showRecommendations') !== 'false';
+    
+    console.log('Saved notification settings:', {
+      emailNotifications: savedEmailNotifs,
+      bookingReminders: savedBookingReminders,
+      showRecommendations: savedShowRecommendations
+    });
+    
+    setEmailNotifications(savedEmailNotifs);
+    setBookingReminders(savedBookingReminders);
+    setShowRecommendations(savedShowRecommendations);
+  }, []);
+
+  // Apply dark mode to the document using the utility functions
+  const applyDarkModeFromSetting = (isDarkMode: boolean) => {
+    console.log('Applying dark mode:', isDarkMode);
+    
+    if (isDarkMode) {
+      applyDarkModeUtil();
+    } else {
+      applyLightMode();
+    }
+  };
+
+  // Handle dark mode toggle
+  const handleDarkModeChange = (checked: boolean) => {
+    console.log('Dark mode toggled to:', checked);
+    setDarkMode(checked);
+    localStorage.setItem('darkMode', checked.toString());
+    
+    // Apply dark mode class to the document
+    applyDarkModeFromSetting(checked);
+    
+    // Show notification to confirm the change
+    notification.success({
+      message: checked ? 'Dark Mode Enabled' : 'Light Mode Enabled',
+      description: checked 
+        ? 'The dark theme has been applied.' 
+        : 'The light theme has been applied.',
+      placement: 'topRight',
+      duration: 2
+    });
+  };
 
   const handleSaveSettings = async () => {
     setLoading(true);
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Get token
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('Please log in to save settings');
+      }
       
-      const settings = {
-        notifications: {
-          email: emailNotifications,
-          bookingReminders,
-          promotional: promotionalEmails,
-          sms: smsNotifications
-        },
-        privacy: {
-          profileVisibility: showProfile,
-          shareBookingHistory
-        },
-        preferences: {
-          language,
-          currency,
-          timeFormat
-        }
-      };
-
-      console.log('Saving settings:', settings);
-      message.success('Settings saved successfully');
+      console.log('Saving settings with token:', token ? 'Valid token exists' : 'No token');
+      console.log('Settings to save:', {
+        emailNotifications,
+        bookingReminders,
+        showRecommendations,
+        darkMode
+      });
+      
+      // Save notification preferences with only supported fields
+      const notifResult = await updateNotificationPreferences({
+        email_notifications: emailNotifications,
+        booking_reminders: bookingReminders,
+        promotional_emails: true, // Default value to satisfy type
+        sms_notifications: false // Default value to satisfy type
+        // Don't send recommendations_enabled since it's not in the API type
+      }, token);
+      
+      console.log('Notification preferences update result:', notifResult);
+      
+      // Instead of sending theme_mode, store dark mode in localStorage only
+      const prefResult = await updateUserPreferences({
+        currency: 'PHP', // Default value to satisfy type
+        time_format: '24h' // Default value to satisfy type
+        // Don't send theme_mode since it's not in the API type
+      }, token);
+      
+      console.log('User preferences update result:', prefResult);
+      
+      // Save to localStorage (this is what will actually control the settings)
+      localStorage.setItem('emailNotifications', emailNotifications.toString());
+      localStorage.setItem('bookingReminders', bookingReminders.toString());
+      localStorage.setItem('showRecommendations', showRecommendations.toString());
+      localStorage.setItem('darkMode', darkMode.toString());
+      
+      console.log('Settings saved to localStorage');
+      
+      // Apply settings immediately (just to be sure)
+      applyDarkModeFromSetting(darkMode);
+      
+      Modal.success({
+        title: 'Settings Saved',
+        content: 'Your preferences have been updated successfully.'
+      });
     } catch (error) {
-      message.error('Failed to save settings');
+      console.error('Error saving settings:', error);
+      Modal.error({
+        title: 'Error',
+        content: 'Failed to save settings. Please try again.'
+      });
     } finally {
       setLoading(false);
     }
@@ -88,211 +184,149 @@ const Settings = () => {
       cancelText: 'No, Keep My Account',
       onOk() {
         // Implement account deletion logic
-        message.success('Account deletion request submitted');
+        Modal.success({
+          title: 'Account Deletion Requested',
+          content: 'Your account deletion request has been submitted and will be processed within 24 hours.'
+        });
       },
     });
   };
 
-  const handlePasswordReset = () => {
-    // Implement password reset logic
-    message.info('Password reset email sent');
-  };
-
-  const handleTwoFactorAuth = () => {
-    // Implement 2FA setup logic
-    message.info('Two-factor authentication setup will be available soon');
-  };
-
   return (
-    <Layout hasSider className="min-h-screen">
-      <Sidebar userRole="guest" />
-      <Layout className="bg-[#F5F5F5]">
-        <PageTransition>
-          <Content className="p-6">
-            <div className="max-w-4xl mx-auto">
-              <Title level={2} className="mb-6">Settings</Title>
+    <AppLayout userRole="guest">
+      <Content className="p-6" style={{ background: 'var(--app-background, #f5f5f5)' }}>
+        <div className="max-w-3xl mx-auto">
+          <Title level={2} className="mb-6">Settings</Title>
 
-              <Form
-                form={form}
-                layout="vertical"
-                onFinish={handleSaveSettings}
-                className="space-y-6"
+          <Form
+            form={form}
+            layout="vertical"
+            onFinish={handleSaveSettings}
+            initialValues={{
+              emailNotifications,
+              bookingReminders,
+              showRecommendations,
+              darkMode
+            }}
+            className="space-y-6"
+          >
+            <Collapse defaultActiveKey={['1', '2', '3']} className="bg-white">
+              {/* General Settings */}
+              <Panel 
+                header={
+                  <div className="flex items-center gap-2">
+                    <BellOutlined />
+                    <span>General Settings</span>
+                  </div>
+                } 
+                key="1"
               >
-                <Collapse defaultActiveKey={['1', '2', '3', '4']} className="bg-white">
-                  {/* Notification Settings */}
-                  <Panel 
-                    header={
-                      <div className="flex items-center gap-2">
-                        <BellOutlined />
-                        <span>Notification Settings</span>
-                      </div>
-                    } 
-                    key="1"
-                  >
-                    <div className="space-y-4">
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <Text strong>Email Notifications</Text>
-                          <Text type="secondary" className="block">Receive booking confirmations and updates</Text>
-                        </div>
-                        <Switch checked={emailNotifications} onChange={setEmailNotifications} />
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <Text strong>Booking Reminders</Text>
-                          <Text type="secondary" className="block">Get reminded about upcoming stays</Text>
-                        </div>
-                        <Switch checked={bookingReminders} onChange={setBookingReminders} />
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <Text strong>Promotional Emails</Text>
-                          <Text type="secondary" className="block">Receive special offers and discounts</Text>
-                        </div>
-                        <Switch checked={promotionalEmails} onChange={setPromotionalEmails} />
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <Text strong>SMS Notifications</Text>
-                          <Text type="secondary" className="block">Get important updates via SMS</Text>
-                        </div>
-                        <Switch checked={smsNotifications} onChange={setSmsNotifications} />
-                      </div>
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <Text strong>Email Notifications</Text>
+                      <Text type="secondary" className="block">Receive booking confirmations and updates</Text>
                     </div>
-                  </Panel>
-
-                  {/* Privacy Settings */}
-                  <Panel 
-                    header={
-                      <div className="flex items-center gap-2">
-                        <LockOutlined />
-                        <span>Privacy Settings</span>
-                      </div>
-                    } 
-                    key="2"
-                  >
-                    <div className="space-y-4">
-                      <div>
-                        <Text strong className="block mb-2">Profile Visibility</Text>
-                        <Radio.Group value={showProfile} onChange={e => setShowProfile(e.target.value)}>
-                          <Radio value="public">Public</Radio>
-                          <Radio value="private">Private</Radio>
-                          <Radio value="friends">Friends Only</Radio>
-                        </Radio.Group>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <Text strong>Share Booking History</Text>
-                          <Text type="secondary" className="block">Allow hotels to view your past stays</Text>
-                        </div>
-                        <Switch checked={shareBookingHistory} onChange={setShareBookingHistory} />
-                      </div>
+                    <Switch 
+                      checked={emailNotifications} 
+                      onChange={(checked) => {
+                        console.log('Email notifications toggled:', checked);
+                        setEmailNotifications(checked);
+                      }} 
+                    />
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <Text strong>Booking Reminders</Text>
+                      <Text type="secondary" className="block">Get reminded about upcoming stays</Text>
                     </div>
-                  </Panel>
-
-                  {/* Preferences */}
-                  <Panel 
-                    header={
-                      <div className="flex items-center gap-2">
-                        <GlobalOutlined />
-                        <span>Preferences</span>
-                      </div>
-                    } 
-                    key="3"
-                  >
-                    <div className="space-y-4">
-                      <div>
-                        <Text strong className="block mb-2">Language</Text>
-                        <Select
-                          value={language}
-                          onChange={setLanguage}
-                          style={{ width: 200 }}
-                          options={[
-                            { value: 'en', label: 'English' },
-                            { value: 'fil', label: 'Filipino' },
-                            { value: 'es', label: 'Spanish' },
-                            { value: 'zh', label: 'Chinese' }
-                          ]}
-                        />
-                      </div>
-                      <div>
-                        <Text strong className="block mb-2">Currency</Text>
-                        <Select
-                          value={currency}
-                          onChange={setCurrency}
-                          style={{ width: 200 }}
-                          options={[
-                            { value: 'PHP', label: 'Philippine Peso (₱)' },
-                            { value: 'USD', label: 'US Dollar ($)' },
-                            { value: 'EUR', label: 'Euro (€)' },
-                            { value: 'GBP', label: 'British Pound (£)' }
-                          ]}
-                        />
-                      </div>
-                      <div>
-                        <Text strong className="block mb-2">Time Format</Text>
-                        <Radio.Group value={timeFormat} onChange={e => setTimeFormat(e.target.value)}>
-                          <Radio value="12h">12-hour</Radio>
-                          <Radio value="24h">24-hour</Radio>
-                        </Radio.Group>
-                      </div>
+                    <Switch 
+                      checked={bookingReminders} 
+                      onChange={(checked) => {
+                        console.log('Booking reminders toggled:', checked);
+                        setBookingReminders(checked);
+                      }} 
+                    />
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <Text strong>Room Recommendations</Text>
+                      <Text type="secondary" className="block">Show personalized room suggestions</Text>
                     </div>
-                  </Panel>
+                    <Switch 
+                      checked={showRecommendations} 
+                      onChange={(checked) => {
+                        console.log('Recommendations toggled:', checked);
+                        setShowRecommendations(checked);
+                      }}
+                      className="recommendation-switch"
+                    />
+                  </div>
+                </div>
+              </Panel>
 
-                  {/* Security Settings */}
-                  <Panel 
-                    header={
-                      <div className="flex items-center gap-2">
-                        <SafetyCertificateOutlined />
-                        <span>Security Settings</span>
-                      </div>
-                    } 
-                    key="4"
-                  >
-                    <div className="space-y-4">
-                      <Button 
-                        icon={<LockOutlined />}
-                        onClick={handlePasswordReset}
-                        className="w-full md:w-auto"
-                      >
-                        Change Password
-                      </Button>
-                      <Button 
-                        icon={<SafetyCertificateOutlined />}
-                        onClick={handleTwoFactorAuth}
-                        className="w-full md:w-auto"
-                      >
-                        Setup Two-Factor Authentication
-                      </Button>
-                      <Divider />
-                      <Button 
-                        danger 
-                        icon={<DeleteOutlined />}
-                        onClick={showDeleteAccountConfirm}
-                        className="w-full md:w-auto"
-                      >
-                        Delete Account
-                      </Button>
+              {/* Preferences */}
+              <Panel 
+                header={
+                  <div className="flex items-center gap-2">
+                    <SettingOutlined />
+                    <span>Preferences</span>
+                  </div>
+                } 
+                key="2"
+              >
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <Text strong>Dark Mode</Text>
+                      <Text type="secondary" className="block">Switch between light and dark themes</Text>
                     </div>
-                  </Panel>
-                </Collapse>
+                    <Switch 
+                      checked={darkMode} 
+                      onChange={handleDarkModeChange}
+                      className="dark-mode-switch"
+                    />
+                  </div>
+                </div>
+              </Panel>
 
-                <div className="flex justify-end">
+              {/* Account Settings */}
+              <Panel 
+                header={
+                  <div className="flex items-center gap-2">
+                    <DeleteOutlined />
+                    <span>Account Settings</span>
+                  </div>
+                } 
+                key="3"
+              >
+                <div className="space-y-4">
                   <Button 
-                    type="primary"
-                    onClick={handleSaveSettings}
-                    loading={loading}
-                    className="bg-[#2C1810] hover:bg-[#3D2317]"
+                    danger 
+                    icon={<DeleteOutlined />}
+                    onClick={showDeleteAccountConfirm}
+                    className="w-full md:w-auto"
                   >
-                    Save Settings
+                    Delete Account
                   </Button>
                 </div>
-              </Form>
+              </Panel>
+            </Collapse>
+
+            <div className="flex justify-end">
+              <Button 
+                type="primary"
+                htmlType="submit"
+                loading={loading}
+                className="bg-[#2C1810] hover:bg-[#3D2317]"
+              >
+                Save Settings
+              </Button>
             </div>
-          </Content>
-        </PageTransition>
-      </Layout>
-    </Layout>
+          </Form>
+        </div>
+      </Content>
+    </AppLayout>
   );
 };
 

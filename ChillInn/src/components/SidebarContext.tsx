@@ -14,7 +14,10 @@ export const SidebarProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   useEffect(() => {
     const handleResize = () => {
-      setIsMobile(window.innerWidth < 768);
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      // No longer auto-collapse on mobile size changes
+      // Let the user control sidebar visibility on all screen sizes
     };
 
     window.addEventListener('resize', handleResize);

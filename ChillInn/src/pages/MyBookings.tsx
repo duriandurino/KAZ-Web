@@ -5,21 +5,22 @@ import {
   ClockCircleOutlined, 
   DollarOutlined, 
   CheckCircleOutlined,
-  ExclamationCircleOutlined 
+  ExclamationCircleOutlined,
+  StarOutlined,
+  EditOutlined,
+  UserOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import AppLayout from '../components/AppLayout';
+import ReviewForm from '../components/ReviewForm';
+import { getGuestBookings, cancelBooking } from '../lib/bookingService';
+import { getBookingPayments } from '../lib/paymentService';
+import { getRoomThumbnail, getRoomPreviewImages } from '../lib/cloudinaryService';
+import CachedImage from '../components/CachedImage';
+import { BookingStatus, Payment } from '../utils/types';
 
 const { Title, Text, Paragraph } = Typography;
 const { TabPane } = Tabs;
-
-interface Payment {
-  payment_id: number;
-  booking_id: number;
-  amount: number;
-  method: string;
-  payment_date: string;
-}
 
 interface Booking {
   booking_id: number;
@@ -28,102 +29,18 @@ interface Booking {
   room_name: string;
   room_type: string;
   room_image: string;
+  images?: string[];
   check_in: string;
   check_out: string;
   guests: number;
-  status: 'Pending' | 'Confirmed' | 'Completed' | 'Cancelled';
+  status: BookingStatus;
   total_price: number;
   created_at: string;
   payments: Payment[];
+  has_review?: boolean;
 }
 
-// Dummy data
-const dummyBookings: Booking[] = [
-  {
-    booking_id: 1,
-    guest_id: 1,
-    room_id: 101,
-    room_name: "Deluxe Ocean View",
-    room_type: "Deluxe Suite",
-    room_image: "https://images.unsplash.com/photo-1618773928121-c32242e63f39?q=80&w=2070",
-    check_in: "2024-06-15",
-    check_out: "2024-06-20",
-    guests: 2,
-    status: "Confirmed",
-    total_price: 25000,
-    created_at: "2024-04-01T10:30:00",
-    payments: [
-      {
-        payment_id: 1,
-        booking_id: 1,
-        amount: 12500,
-        method: "Credit Card",
-        payment_date: "2024-04-01T10:35:00"
-      }
-    ]
-  },
-  {
-    booking_id: 2,
-    guest_id: 1,
-    room_id: 102,
-    room_name: "Premium Mountain View",
-    room_type: "Premium Suite",
-    room_image: "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?q=80&w=2070",
-    check_in: "2024-06-25",
-    check_out: "2024-06-28",
-    guests: 3,
-    status: "Pending",
-    total_price: 15000,
-    created_at: "2024-04-02T14:20:00",
-    payments: []
-  },
-  {
-    booking_id: 3,
-    guest_id: 1,
-    room_id: 103,
-    room_name: "Standard City View",
-    room_type: "Standard Room",
-    room_image: "https://images.unsplash.com/photo-1614518921956-0d7c71b7999d?q=80&w=2070",
-    check_in: "2024-05-10",
-    check_out: "2024-05-15",
-    guests: 1,
-    status: "Completed",
-    total_price: 18000,
-    created_at: "2024-03-01T09:15:00",
-    payments: [
-      {
-        payment_id: 2,
-        booking_id: 3,
-        amount: 18000,
-        method: "Bank Transfer",
-        payment_date: "2024-03-01T09:20:00"
-      }
-    ]
-  },
-  {
-    booking_id: 4,
-    guest_id: 1,
-    room_id: 104,
-    room_name: "Executive Garden Suite",
-    room_type: "Executive Suite",
-    room_image: "https://images.unsplash.com/photo-1615874959474-d609969a20ed?q=80&w=2070",
-    check_in: "2024-07-05",
-    check_out: "2024-07-10",
-    guests: 2,
-    status: "Confirmed",
-    total_price: 30000,
-    created_at: "2024-04-15T16:45:00",
-    payments: [
-      {
-        payment_id: 3,
-        booking_id: 4,
-        amount: 15000,
-        method: "Credit Card",
-        payment_date: "2024-04-15T16:50:00"
-      }
-    ]
-  }
-];
+const DEFAULT_ROOM_IMAGE = 'https://images.unsplash.com/photo-1590490360182-c33d57733427';
 
 const MyBookings = () => {
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -132,14 +49,100 @@ const MyBookings = () => {
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isCancelModalVisible, setIsCancelModalVisible] = useState(false);
+  const [isReviewModalVisible, setIsReviewModalVisible] = useState(false);
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [roomImages, setRoomImages] = useState<{[key: string]: {thumbnail: string | null, previews: string[]}}>({}); 
 
   useEffect(() => {
-    // Simulate API call to fetch bookings
-    setTimeout(() => {
-      setBookings(dummyBookings);
-      setLoading(false);
-    }, 1000);
+    fetchBookings();
   }, []);
+
+  const fetchBookings = async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        // Redirect to login if no token
+        window.location.href = '/';
+        return;
+      }
+
+      const response = await getGuestBookings(token);
+      console.log('Fetched bookings:', response);
+      
+      // Ensure all bookings have an empty payments array initially
+      const processedBookings = response.bookings.map(booking => ({
+        ...booking,
+        payments: booking.payments || [],
+        room_image: booking.room_image || (booking.images && booking.images.length > 0 
+          ? booking.images[0] 
+          : DEFAULT_ROOM_IMAGE)
+      }));
+      
+      setBookings(processedBookings);
+      
+      // Fetch images for each booking
+      processedBookings.forEach(booking => {
+        fetchRoomImages(booking.room_id, token);
+      });
+    } catch (error) {
+      console.error('Error fetching bookings:', error);
+      message.error('Failed to load bookings. Please try again later.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchRoomImages = async (roomId: number, token: string) => {
+    try {
+      // Get room thumbnail and preview images in parallel
+      const [thumbnailData, previewData] = await Promise.all([
+        getRoomThumbnail(roomId.toString(), token),
+        getRoomPreviewImages(roomId.toString(), token)
+      ]);
+      
+      // Set the images for this room
+      setRoomImages(prev => ({
+        ...prev,
+        [roomId]: {
+          thumbnail: thumbnailData.imageUrl,
+          previews: previewData.map(image => image.imageUrl).filter(Boolean) as string[]
+        }
+      }));
+      
+      // Update bookings with actual images
+      setBookings(prevBookings => prevBookings.map(booking => {
+        if (booking.room_id === roomId) {
+          return {
+            ...booking,
+            room_image: thumbnailData.imageUrl || (previewData.length > 0 ? previewData[0].imageUrl : booking.room_image)
+          };
+        }
+        return booking;
+      }));
+    } catch (error) {
+      console.error(`Error fetching images for room ${roomId}:`, error);
+      // Don't show error to user to avoid cluttering the UI
+    }
+  };
+
+  const fetchBookingPayments = async (booking: Booking) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      const response = await getBookingPayments(booking.booking_id, token);
+      
+      // Update the selected booking with payment data
+      setSelectedBooking({
+        ...booking,
+        payments: response.payments || []
+      });
+    } catch (error) {
+      console.error('Error fetching booking payments:', error);
+      message.error('Failed to load payment details.');
+    }
+  };
 
   const formatDate = (dateString: string) => {
     return dayjs(dateString).format('MMM D, YYYY');
@@ -149,14 +152,16 @@ const MyBookings = () => {
     return `₱${price.toLocaleString()}`;
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: BookingStatus) => {
     switch (status) {
       case 'Confirmed':
         return 'green';
       case 'Pending':
         return 'orange';
-      case 'Completed':
+      case 'Checked-in':
         return 'blue';
+      case 'Checked-out':
+        return 'purple';
       case 'Cancelled':
         return 'red';
       default:
@@ -167,14 +172,29 @@ const MyBookings = () => {
   const showBookingDetails = (booking: Booking) => {
     setSelectedBooking(booking);
     setIsModalVisible(true);
+    fetchBookingPayments(booking);
   };
 
-  const handleCancelBooking = () => {
-    if (selectedBooking) {
-      // In a real app, you would make an API call here
+  const confirmCancellation = (booking: Booking) => {
+    setSelectedBooking(booking);
+    setIsCancelModalVisible(true);
+    setIsModalVisible(false);
+  };
+
+  const handleCancelBooking = async () => {
+    if (!selectedBooking) return;
+    
+    setCancelLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      await cancelBooking(selectedBooking.booking_id, token);
+      
+      // Update local state
       const updatedBookings = bookings.map(booking => 
         booking.booking_id === selectedBooking.booking_id 
-          ? { ...booking, status: 'Cancelled' as const } 
+          ? { ...booking, status: 'Cancelled' as BookingStatus } 
           : booking
       );
       
@@ -182,16 +202,16 @@ const MyBookings = () => {
       setSelectedBooking({ ...selectedBooking, status: 'Cancelled' });
       setIsCancelModalVisible(false);
       message.success('Booking cancelled successfully');
+    } catch (error) {
+      console.error('Error cancelling booking:', error);
+      message.error('Failed to cancel booking. Please try again.');
+    } finally {
+      setCancelLoading(false);
     }
   };
 
-  const confirmCancellation = (booking: Booking) => {
-    setSelectedBooking(booking);
-    setIsCancelModalVisible(true);
-  };
-
   const getRemainingBalance = (booking: Booking) => {
-    const totalPaid = booking.payments.reduce((sum, payment) => sum + payment.amount, 0);
+    const totalPaid = booking.payments?.reduce((sum, payment) => sum + payment.amount, 0) || 0;
     return booking.total_price - totalPaid;
   };
 
@@ -199,193 +219,210 @@ const MyBookings = () => {
     return dayjs(checkOut).diff(dayjs(checkIn), 'day');
   };
 
-  const upcomingBookings = bookings.filter(
-    booking => dayjs(booking.check_in).isAfter(dayjs()) && booking.status !== 'Cancelled'
-  );
-  
-  const historyBookings = bookings.filter(
-    booking => dayjs(booking.check_in).isBefore(dayjs()) || booking.status === 'Cancelled'
-  );
+  const handleOpenReviewModal = (booking: Booking) => {
+    setSelectedBooking(booking);
+    setIsReviewModalVisible(true);
+    setIsModalVisible(false); // Close the details modal
+  };
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#D4AF37]"></div>
-      </div>
-    );
-  }
+  const handleReviewSuccess = () => {
+    if (selectedBooking) {
+      // Update local state to mark this booking as having a review
+      const updatedBookings = bookings.map(booking => 
+        booking.booking_id === selectedBooking.booking_id 
+          ? { ...booking, has_review: true } 
+          : booking
+      );
+      
+      setBookings(updatedBookings);
+      setIsReviewModalVisible(false);
+      message.success('Thank you for your review!');
+    }
+  };
+
+  // Filter bookings by tab
+  const filteredBookings = bookings.filter(booking => {
+    const now = dayjs();
+    const checkIn = dayjs(booking.check_in);
+    const checkOut = dayjs(booking.check_out);
+    
+    if (activeTab === 'upcoming') {
+      return (checkIn.isAfter(now) || checkIn.isSame(now, 'day')) && booking.status !== 'Cancelled';
+    } else if (activeTab === 'past') {
+      return checkOut.isBefore(now) || booking.status === 'Checked-out' || booking.status === 'Cancelled';
+    }
+    return true; // All bookings tab
+  });
 
   return (
-    <AppLayout userRole="guest" userName="John Doe">
-      <div className="p-6 bg-[#F5F5F5] min-h-screen">
+    <AppLayout userRole="guest">
+      <div className="p-6">
         <div className="max-w-6xl mx-auto">
-          <Title level={2} className="mb-6">My Bookings</Title>
+          <Title level={3} className="mb-6">My Bookings</Title>
           
-          <Tabs 
-            activeKey={activeTab} 
-            onChange={setActiveTab}
-            className="bg-white p-4 rounded shadow-sm"
-          >
-            <TabPane tab="Upcoming" key="upcoming">
-              {upcomingBookings.length > 0 ? (
-                <div className="space-y-4">
-                  {upcomingBookings.map(booking => (
-                    <Card key={booking.booking_id} className="hover:shadow-md transition-shadow">
-                      <Row gutter={[16, 16]} align="middle">
-                        <Col xs={24} md={6}>
-                          <div className="aspect-video rounded overflow-hidden">
-                            <img src={booking.room_image} alt={booking.room_name} className="w-full h-full object-cover" />
-                          </div>
-                        </Col>
-                        
-                        <Col xs={24} md={12}>
-                          <div className="space-y-2">
-                            <Title level={4} className="mb-0">{booking.room_name}</Title>
-                            <Text type="secondary">{booking.room_type}</Text>
-                            
-                            <div className="flex items-center gap-3 mt-2">
-                              <Tag color={getStatusColor(booking.status)}>{booking.status}</Tag>
-                              <Text type="secondary">Booking #{booking.booking_id}</Text>
-                            </div>
-                            
-                            <div className="flex flex-col sm:flex-row gap-4 mt-2">
-                              <div className="flex items-center">
-                                <CalendarOutlined className="mr-2 text-[#D4AF37]" />
-                                <Text>{formatDate(booking.check_in)} - {formatDate(booking.check_out)}</Text>
-                              </div>
-                              <div className="flex items-center">
-                                <ClockCircleOutlined className="mr-2 text-[#D4AF37]" />
-                                <Text>{getNights(booking.check_in, booking.check_out)} Nights</Text>
-                              </div>
-                            </div>
-                          </div>
-                        </Col>
-                        
-                        <Col xs={24} md={6} className="flex flex-col items-end justify-between h-full">
-                          <div className="text-right">
-                            <Title level={5} className="mb-0">{formatPrice(booking.total_price)}</Title>
-                            <Text type="secondary">Total</Text>
-                          </div>
-                          
-                          <div className="mt-4 space-y-2 w-full sm:text-right">
-                            <Button type="primary" className="w-full sm:w-auto bg-[#2C1810] hover:bg-[#3D2317]" onClick={() => showBookingDetails(booking)}>
-                              View Details
-                            </Button>
-                            
-                            {booking.status !== 'Cancelled' && (
-                              <Button danger className="w-full sm:w-auto" onClick={() => confirmCancellation(booking)}>
-                                Cancel Booking
-                              </Button>
-                            )}
-                          </div>
-                        </Col>
-                      </Row>
-                    </Card>
-                  ))}
-                </div>
-              ) : (
-                <Empty
-                  description="You don't have any upcoming bookings"
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                />
-              )}
-            </TabPane>
-            
-            <TabPane tab="History" key="history">
-              {historyBookings.length > 0 ? (
-                <div className="space-y-4">
-                  {historyBookings.map(booking => (
-                    <Card key={booking.booking_id} className="hover:shadow-md transition-shadow">
-                      <Row gutter={[16, 16]} align="middle">
-                        <Col xs={24} md={6}>
-                          <div className="aspect-video rounded overflow-hidden">
-                            <img src={booking.room_image} alt={booking.room_name} className="w-full h-full object-cover" />
-                          </div>
-                        </Col>
-                        
-                        <Col xs={24} md={12}>
-                          <div className="space-y-2">
-                            <Title level={4} className="mb-0">{booking.room_name}</Title>
-                            <Text type="secondary">{booking.room_type}</Text>
-                            
-                            <div className="flex items-center gap-3 mt-2">
-                              <Tag color={getStatusColor(booking.status)}>{booking.status}</Tag>
-                              <Text type="secondary">Booking #{booking.booking_id}</Text>
-                            </div>
-                            
-                            <div className="flex flex-col sm:flex-row gap-4 mt-2">
-                              <div className="flex items-center">
-                                <CalendarOutlined className="mr-2 text-[#D4AF37]" />
-                                <Text>{formatDate(booking.check_in)} - {formatDate(booking.check_out)}</Text>
-                              </div>
-                              <div className="flex items-center">
-                                <ClockCircleOutlined className="mr-2 text-[#D4AF37]" />
-                                <Text>{getNights(booking.check_in, booking.check_out)} Nights</Text>
-                              </div>
-                            </div>
-                          </div>
-                        </Col>
-                        
-                        <Col xs={24} md={6} className="flex flex-col items-end justify-between h-full">
-                          <div className="text-right">
-                            <Title level={5} className="mb-0">{formatPrice(booking.total_price)}</Title>
-                            <Text type="secondary">Total</Text>
-                          </div>
-                          
-                          <div className="mt-4 w-full sm:text-right">
-                            <Button type="primary" className="w-full sm:w-auto bg-[#2C1810] hover:bg-[#3D2317]" onClick={() => showBookingDetails(booking)}>
-                              View Details
-                            </Button>
-                          </div>
-                        </Col>
-                      </Row>
-                    </Card>
-                  ))}
-                </div>
-              ) : (
-                <Empty
-                  description="You don't have any booking history"
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                />
-              )}
-            </TabPane>
+          <Tabs defaultActiveKey="upcoming" onChange={setActiveTab} className="mb-6">
+            <TabPane tab="Upcoming Bookings" key="upcoming" />
+            <TabPane tab="Past Bookings" key="past" />
+            <TabPane tab="All Bookings" key="all" />
           </Tabs>
+
+          {loading ? (
+            <div className="text-center py-10">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-[#D4AF37]"></div>
+              <Text className="block mt-2">Loading your bookings...</Text>
+            </div>
+          ) : filteredBookings.length === 0 ? (
+            <Empty description="No bookings found" />
+          ) : (
+            <Row gutter={[16, 16]}>
+              {filteredBookings.map(booking => (
+                <Col xs={24} md={12} xl={8} key={booking.booking_id}>
+                  <Card 
+                    hoverable 
+                    className="booking-card shadow-sm hover:shadow-md transition-shadow"
+                    cover={
+                      <div className="h-48 overflow-hidden">
+                        <CachedImage
+                          alt={booking.room_name}
+                          src={booking.room_image || DEFAULT_ROOM_IMAGE}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          fallback={DEFAULT_ROOM_IMAGE}
+                        />
+                      </div>
+                    }
+                  >
+                    <div className="mb-3 flex justify-between items-center">
+                      <Title level={5} className="mb-0">{booking.room_name}</Title>
+                      <Tag color={getStatusColor(booking.status)}>{booking.status}</Tag>
+                    </div>
+
+                    <div className="mb-4">
+                      <div className="flex items-center mb-1">
+                        <CalendarOutlined className="mr-2 text-[#D4AF37]" />
+                        <Text>{formatDate(booking.check_in)} - {formatDate(booking.check_out)}</Text>
+                      </div>
+                      <div className="flex items-center">
+                        <DollarOutlined className="mr-2 text-[#D4AF37]" />
+                        <Text>{formatPrice(booking.total_price)}</Text>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center">
+                      <Text type="secondary" className="text-sm">
+                        <ClockCircleOutlined className="mr-1" /> 
+                        Booked on {dayjs(booking.created_at).format('MMM D, YYYY')}
+                      </Text>
+                      
+                      <Button type="link" onClick={() => showBookingDetails(booking)}>
+                        View Details
+                      </Button>
+                    </div>
+                    
+                    {booking.status === 'Checked-out' && !booking.has_review && (
+                      <div className="mt-3 pt-3 border-t">
+                        <Button 
+                          icon={<StarOutlined />} 
+                          type="primary" 
+                          className="w-full bg-[#D4AF37]" 
+                          onClick={() => handleOpenReviewModal(booking)}
+                        >
+                          Leave a Review
+                        </Button>
+                      </div>
+                    )}
+                    
+                    {booking.status === 'Checked-out' && booking.has_review && (
+                      <div className="mt-3 pt-3 border-t">
+                        <Tag color="success" className="w-full text-center py-1">
+                          <CheckCircleOutlined className="mr-1" /> 
+                          Review Submitted
+                        </Tag>
+                      </div>
+                    )}
+                  </Card>
+                </Col>
+              ))}
+            </Row>
+          )}
         </div>
       </div>
 
       {/* Booking Details Modal */}
       <Modal
-        title={<Title level={3} className="m-0">Booking Details</Title>}
+        title={<div className="flex items-center gap-2"><CalendarOutlined /> Booking Details</div>}
         open={isModalVisible}
         onCancel={() => setIsModalVisible(false)}
         footer={null}
         width={800}
-        centered
       >
         {selectedBooking && (
-          <div className="space-y-6">
-            <Card className="shadow-sm">
-              <Row gutter={[24, 24]}>
-                <Col xs={24} md={8}>
-                  <div className="aspect-square rounded overflow-hidden">
-                    <img src={selectedBooking.room_image} alt={selectedBooking.room_name} className="w-full h-full object-cover" />
+          <div className="booking-details">
+            <Row gutter={[24, 24]}>
+              <Col xs={24} md={12}>
+                <CachedImage
+                  src={selectedBooking.room_image || DEFAULT_ROOM_IMAGE}
+                  alt={selectedBooking.room_name}
+                  style={{ width: '100%', height: 'auto', borderRadius: '8px' }}
+                  fallback={DEFAULT_ROOM_IMAGE}
+                />
+                {roomImages[selectedBooking.room_id]?.previews?.length > 0 && (
+                  <div className="mt-4 flex gap-2 overflow-x-auto">
+                    {roomImages[selectedBooking.room_id].previews.slice(0, 3).map((previewUrl, index) => (
+                      <CachedImage
+                        key={index}
+                        src={previewUrl}
+                        alt={`${selectedBooking.room_name} preview ${index + 1}`}
+                        style={{ width: '80px', height: '60px', objectFit: 'cover', borderRadius: '4px' }}
+                        fallback={DEFAULT_ROOM_IMAGE}
+                      />
+                    ))}
+                    {roomImages[selectedBooking.room_id].previews.length > 3 && (
+                      <div className="relative w-[80px] h-[60px] bg-gray-800 rounded flex items-center justify-center">
+                        <Text className="text-white">+{roomImages[selectedBooking.room_id].previews.length - 3}</Text>
+                      </div>
+                    )}
                   </div>
-                </Col>
-                <Col xs={24} md={16}>
-                  <Descriptions column={1} bordered>
-                    <Descriptions.Item label="Room Name">{selectedBooking.room_name}</Descriptions.Item>
-                    <Descriptions.Item label="Room Type">{selectedBooking.room_type}</Descriptions.Item>
-                    <Descriptions.Item label="Check-in">{formatDate(selectedBooking.check_in)}</Descriptions.Item>
-                    <Descriptions.Item label="Check-out">{formatDate(selectedBooking.check_out)}</Descriptions.Item>
-                    <Descriptions.Item label="Guests">{selectedBooking.guests}</Descriptions.Item>
-                    <Descriptions.Item label="Status">
-                      <Tag color={getStatusColor(selectedBooking.status)}>{selectedBooking.status}</Tag>
-                    </Descriptions.Item>
-                    <Descriptions.Item label="Booking Date">{dayjs(selectedBooking.created_at).format('MMMM D, YYYY, h:mm A')}</Descriptions.Item>
-                  </Descriptions>
-                </Col>
-              </Row>
-            </Card>
+                )}
+              </Col>
+              <Col xs={24} md={12}>
+                <div className="mb-4">
+                  <div className="flex justify-between items-center">
+                    <Title level={4} className="mb-1">{selectedBooking.room_name}</Title>
+                    <Tag color={getStatusColor(selectedBooking.status)}>
+                      {selectedBooking.status}
+                    </Tag>
+                  </div>
+                  <Text type="secondary">{selectedBooking.room_type}</Text>
+                </div>
+
+                <Card className="shadow-sm">
+                  <div className="space-y-3">
+                    <div className="flex items-center">
+                      <CalendarOutlined className="mr-2 text-[#D4AF37]" />
+                      <Text strong>Check-in:</Text>
+                      <Text className="ml-2">{formatDate(selectedBooking.check_in)}</Text>
+                    </div>
+                    <div className="flex items-center">
+                      <CalendarOutlined className="mr-2 text-[#D4AF37]" />
+                      <Text strong>Check-out:</Text>
+                      <Text className="ml-2">{formatDate(selectedBooking.check_out)}</Text>
+                    </div>
+                    <div className="flex items-center">
+                      <UserOutlined className="mr-2 text-[#D4AF37]" />
+                      <Text strong>Guests:</Text>
+                      <Text className="ml-2">{selectedBooking.guests}</Text>
+                    </div>
+                    <div className="flex items-center">
+                      <ClockCircleOutlined className="mr-2 text-[#D4AF37]" />
+                      <Text strong>Booked on:</Text>
+                      <Text className="ml-2">{dayjs(selectedBooking.created_at).format('MMMM D, YYYY, h:mm A')}</Text>
+                    </div>
+                  </div>
+                </Card>
+              </Col>
+            </Row>
+
+            <Divider />
 
             <Card className="shadow-sm">
               <Title level={4} className="mb-4">Payment Details</Title>
@@ -405,7 +442,7 @@ const MyBookings = () => {
                 
                 <div className="flex justify-between">
                   <Text strong>Paid</Text>
-                  <Text strong>{formatPrice(selectedBooking.payments.reduce((sum, payment) => sum + payment.amount, 0))}</Text>
+                  <Text strong>{formatPrice(selectedBooking.payments?.reduce((sum, payment) => sum + payment.amount, 0) || 0)}</Text>
                 </div>
                 
                 <div className="flex justify-between">
@@ -416,7 +453,7 @@ const MyBookings = () => {
                 </div>
               </div>
               
-              {selectedBooking.payments.length > 0 && (
+              {selectedBooking.payments && selectedBooking.payments.length > 0 && (
                 <div className="mt-6">
                   <Title level={5} className="mb-3">Payment History</Title>
                   <List
@@ -439,12 +476,24 @@ const MyBookings = () => {
               )}
             </Card>
 
-            <div className="flex justify-end gap-3">
-              {selectedBooking.status !== 'Cancelled' && selectedBooking.status !== 'Completed' && (
+            <div className="flex justify-end gap-3 mt-4">
+              {selectedBooking.status === 'Checked-out' && !selectedBooking.has_review && (
+                <Button 
+                  type="primary" 
+                  icon={<EditOutlined />}
+                  onClick={() => handleOpenReviewModal(selectedBooking)}
+                  className="bg-[#D4AF37]"
+                >
+                  Leave a Review
+                </Button>
+              )}
+              
+              {(selectedBooking.status === 'Pending' || selectedBooking.status === 'Confirmed') && (
                 <Button danger onClick={() => confirmCancellation(selectedBooking)}>
                   Cancel Booking
                 </Button>
               )}
+              
               <Button onClick={() => setIsModalVisible(false)}>Close</Button>
             </div>
           </div>
@@ -458,11 +507,29 @@ const MyBookings = () => {
         onCancel={() => setIsCancelModalVisible(false)}
         onOk={handleCancelBooking}
         okText="Yes, Cancel Booking"
-        okButtonProps={{ danger: true }}
+        okButtonProps={{ danger: true, loading: cancelLoading }}
         cancelText="No, Keep Booking"
       >
         <p>Are you sure you want to cancel this booking?</p>
         <p>This action cannot be undone.</p>
+      </Modal>
+      
+      {/* Review Modal */}
+      <Modal
+        title={<div className="flex items-center gap-2"><StarOutlined /> Rate Your Stay</div>}
+        open={isReviewModalVisible}
+        onCancel={() => setIsReviewModalVisible(false)}
+        footer={null}
+        width={600}
+        destroyOnClose
+      >
+        {selectedBooking && (
+          <ReviewForm 
+            bookingId={selectedBooking.booking_id} 
+            onSuccess={handleReviewSuccess}
+            onCancel={() => setIsReviewModalVisible(false)}
+          />
+        )}
       </Modal>
     </AppLayout>
   );

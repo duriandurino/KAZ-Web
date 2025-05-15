@@ -8,13 +8,17 @@ import {
   CalendarOutlined, 
   BarsOutlined,
   MenuUnfoldOutlined,
-  MenuFoldOutlined
+  MenuFoldOutlined,
+  StarOutlined,
+  AppstoreAddOutlined,
+  CustomerServiceOutlined,
+  DollarOutlined
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { removeToken } from '../utils/auth';
 import logo from '../assets/logoDark.png';
 import { motion } from 'framer-motion';
-import axios from 'axios';
+import { getUserProfile } from '../lib/userService';
 import { useSidebar } from './SidebarContext';
 import CachedImage from './CachedImage';
 
@@ -46,12 +50,15 @@ interface SidebarProps {
   userName?: string;
 }
 
+const DEFAULT_PROFILE_IMAGE = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI2NjYyI+PHBhdGggZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyczQuNDggMTAgMTAgMTAgMTAtNC40OCAxMC0xMFMxNy41MiAyIDEyIDJ6bTAgM2MyLjY3IDAgNC44NCAyLjE3IDQuODQgNC44NFMxNC42NyAxNC42OCAxMiAxNC42OCA3LjE2IDEyLjUxIDcuMTYgOS44NCA5LjMzIDUgMTIgNXptMCAxM2MtMi4zMyAwLTQuMzEtMS4zNi01LjI2LTMuMzEuODUtMS40MiAyLjQxLTIuMzcgNC4xNy0yLjM3IDEuNzYgMCAzLjMyLjk1IDQuMTcgMi4zNy0uOTUgMS45NS0yLjkzIDMuMzEtNS4yNiAzLjMxeiIvPjwvc3ZnPg==';
+
 const Sidebar: React.FC<SidebarProps> = ({ userRole, userName }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { token } = theme.useToken();
   const [isLogoutModalVisible, setIsLogoutModalVisible] = React.useState(false);
   const [profileImage, setProfileImage] = useState<string | null>(null);
+  const [loadingImage, setLoadingImage] = useState(false);
   
   // Try to use the context, fall back to local state
   let sidebarState: ReturnType<typeof useSidebar> | undefined;
@@ -83,32 +90,57 @@ const Sidebar: React.FC<SidebarProps> = ({ userRole, userName }) => {
   }, [sidebarState]);
 
   useEffect(() => {
-    const fetchProfileImage = async () => {
-      try {
-        const authToken = localStorage.getItem('token');
-        const userId = localStorage.getItem('userId');
-        
-        if (!authToken || !userId) return;
+    fetchUserProfile();
+    
+    // If userName is not provided but we have a token, try to fetch user details
+    if (!userName) {
+      fetchUserDetails();
+    }
+  }, [userName]);
 
-        // Fetch profile image URL using the updated endpoint
-        const response = await axios.get(`/api/images/profile/${userId}`, {
-          headers: {
-            'x-api-key': import.meta.env.VITE_API_KEY
-          }
-        });
+  const fetchUserProfile = async () => {
+    try {
+      setLoadingImage(true);
+      const authToken = localStorage.getItem('token');
+      
+      if (!authToken) return;
 
-        // Set the profile image URL from the API response
-        if (response.data && response.data.imageUrl) {
-          setProfileImage(response.data.imageUrl);
-        }
-      } catch (error) {
-        console.error('Error fetching profile image:', error);
-        // Don't show error to user, just fail silently for profile image
+      // Fetch user profile info which includes profile image
+      const userData = await getUserProfile(authToken);
+      
+      if (userData && userData.profile_image) {
+        setProfileImage(userData.profile_image);
       }
-    };
+    } catch (error) {
+      console.error('Error fetching profile image:', error);
+      // Don't show error to user, just fail silently for profile image
+    } finally {
+      setLoadingImage(false);
+    }
+  };
 
-    fetchProfileImage();
-  }, []);
+  // New function to fetch user details if not passed as props
+  const fetchUserDetails = async () => {
+    try {
+      const authToken = localStorage.getItem('token');
+      if (!authToken) return;
+      
+      const userData = await getUserProfile(authToken);
+      if (userData) {
+        // Use existing state update if name is already set
+        setUserData(userData);
+      }
+    } catch (error) {
+      console.error('Error fetching user details:', error);
+    }
+  };
+
+  // Add state for user data if not provided through props
+  const [userData, setUserData] = useState<{fullname?: string, role?: string}>({});
+  
+  // Use either props or fetched data
+  const displayName = userName || userData.fullname;
+  const displayRole = userRole || userData.role as 'admin' | 'guest' || 'guest';
 
   const handleNavigation = (path: string) => {
     navigate(path);
@@ -153,6 +185,36 @@ const Sidebar: React.FC<SidebarProps> = ({ userRole, userName }) => {
       label: 'Room Management',
       onClick: () => handleNavigation('/admin/room-management'),
     },
+    {
+      key: 'bookings',
+      icon: <CalendarOutlined />,
+      label: 'Bookings',
+      onClick: () => handleNavigation('/admin/bookings'),
+    },
+    {
+      key: 'payments',
+      icon: <DollarOutlined />,
+      label: 'Payment Management',
+      onClick: () => handleNavigation('/admin/payments'),
+    },
+    {
+      key: 'reviews',
+      icon: <StarOutlined />,
+      label: 'Reviews',
+      onClick: () => handleNavigation('/admin/reviews'),
+    },
+    {
+      key: 'amenities',
+      icon: <AppstoreAddOutlined />,
+      label: 'Amenities',
+      onClick: () => handleNavigation('/admin/amenities'),
+    },
+    {
+      key: 'services',
+      icon: <CustomerServiceOutlined />,
+      label: 'Services',
+      onClick: () => handleNavigation('/admin/services'),
+    },
   ];
 
   const guestMenuItems = [
@@ -190,7 +252,15 @@ const Sidebar: React.FC<SidebarProps> = ({ userRole, userName }) => {
     
     // Check if we're on the admin dashboard
     if (path.startsWith('/admin/')) {
-      return [path.split('/')[2]]; // Returns 'dashboard', 'users', etc.
+      if (path === '/admin/dashboard') return ['dashboard'];
+      if (path === '/admin/user-management') return ['users'];
+      if (path === '/admin/room-management') return ['rooms'];
+      if (path === '/admin/bookings') return ['bookings'];
+      if (path === '/admin/payments') return ['payments'];
+      if (path === '/admin/reviews') return ['reviews'];
+      if (path === '/admin/amenities') return ['amenities'];
+      if (path === '/admin/services') return ['services'];
+      return [];
     }
     
     // For regular user routes
@@ -208,8 +278,8 @@ const Sidebar: React.FC<SidebarProps> = ({ userRole, userName }) => {
       {/* Inject custom scrollbar styles */}
       <style>{customScrollbarStyle}</style>
       
-      {/* Mobile toggle button */}
-      {isMobile && collapsed && (
+      {/* Toggle button - shown when sidebar is collapsed (on any screen size) */}
+      {collapsed && (
         <Button
           type="primary"
           className="fixed z-50 top-4 left-4 flex items-center justify-center"
@@ -222,11 +292,12 @@ const Sidebar: React.FC<SidebarProps> = ({ userRole, userName }) => {
       
       {/* Fixed sidebar */}
       <div 
-        className={`fixed top-0 left-0 w-[280px] h-screen shadow-lg z-40 bg-[#2C1810] transition-transform duration-300 ${
-          isMobile && collapsed ? '-translate-x-full' : 'translate-x-0'
+        className={`fixed top-0 left-0 h-screen shadow-lg z-40 bg-[#2C1810] transition-all duration-300 ${
+          collapsed ? 'w-[0px]' : 'w-[280px]'
         }`}
+        style={{ overflow: 'hidden' }}
       >
-        <div className="flex flex-col h-full overflow-hidden">
+        <div className="flex flex-col h-full w-[280px]">
           <motion.div 
             className="flex flex-col h-full"
             initial={{ x: -280 }}
@@ -235,16 +306,14 @@ const Sidebar: React.FC<SidebarProps> = ({ userRole, userName }) => {
           >
             {/* Logo and User Profile Section */}
             <div className="p-6 flex flex-col relative flex-shrink-0">
-              {/* Mobile close button */}
-              {isMobile && !collapsed && (
-                <Button
-                  type="text"
-                  icon={<MenuFoldOutlined style={{ color: 'white' }} />}
-                  onClick={toggleCollapsed}
-                  className="absolute top-4 right-4 flex items-center justify-center"
-                  style={{ background: 'transparent', border: 'none' }}
-                />
-              )}
+              {/* Collapse button - visible in sidebar */}
+              <Button
+                type="text"
+                icon={<MenuFoldOutlined style={{ color: 'white' }} />}
+                onClick={toggleCollapsed}
+                className="absolute top-4 right-4 flex items-center justify-center"
+                style={{ background: 'transparent', border: 'none' }}
+              />
               
               <motion.div 
                 className="flex items-center justify-center mb-6"
@@ -254,18 +323,23 @@ const Sidebar: React.FC<SidebarProps> = ({ userRole, userName }) => {
                 <img src={logo} alt="ChillInn Logo" className="h-16 w-auto" />
               </motion.div>
               
-              {userName && (
+              {(displayName) && (
                 <motion.div 
                   className="text-center mb-6"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.2 }}
                 >
-                  {profileImage ? (
-                    <div className="relative w-16 h-16 mx-auto mb-3">
+                  <div className="relative w-16 h-16 mx-auto mb-3">
+                    {loadingImage && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-30 rounded-full z-10">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#D4AF37]"></div>
+                      </div>
+                    )}
+                    {profileImage ? (
                       <CachedImage 
                         src={profileImage}
-                        alt={`${userName}'s profile`}
+                        alt={`${displayName}'s profile`}
                         className="rounded-full"
                         style={{ 
                           border: `2px solid ${token.colorBgContainer}`,
@@ -274,21 +348,22 @@ const Sidebar: React.FC<SidebarProps> = ({ userRole, userName }) => {
                           objectFit: 'cover'
                         }}
                         preload={true}
+                        fallback={DEFAULT_PROFILE_IMAGE}
                       />
-                    </div>
-                  ) : (
-                    <Avatar 
-                      size={64} 
-                      icon={<UserOutlined />}
-                      className="mb-3"
-                      style={{ 
-                        backgroundColor: token.colorPrimary,
-                        border: `2px solid ${token.colorBgContainer}`,
-                      }} 
-                    />
-                  )}
-                  <Title level={5} style={{ margin: 0, color: token.colorPrimary }}>{userName}</Title>
-                  <Text style={{ color: token.colorBgContainer }}>{userRole.charAt(0).toUpperCase() + userRole.slice(1)}</Text>
+                    ) : (
+                      <Avatar 
+                        size={64} 
+                        icon={<UserOutlined />}
+                        className="mb-3"
+                        style={{ 
+                          backgroundColor: token.colorPrimary,
+                          border: `2px solid ${token.colorBgContainer}`,
+                        }} 
+                      />
+                    )}
+                  </div>
+                  <Title level={5} style={{ margin: 0, color: token.colorPrimary }}>{displayName}</Title>
+                  <Text style={{ color: token.colorBgContainer }} className="username-text">{displayRole.charAt(0).toUpperCase() + displayRole.slice(1)}</Text>
                 </motion.div>
               )}
             </div>

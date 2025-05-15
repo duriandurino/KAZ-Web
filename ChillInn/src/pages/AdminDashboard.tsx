@@ -1,32 +1,65 @@
 import { useState, useEffect } from "react";
-import { Layout, Card, Typography, message, theme } from "antd";
+import { Layout, Card, Typography, message, theme, Spin, Row, Col, Statistic, Tabs } from "antd";
 import { useNavigate } from "react-router-dom";
-import { UserOutlined, HomeOutlined } from "@ant-design/icons";
-import axios from "axios";
-import Sidebar from "../components/Sidebar";
-import PageTransition from "../components/PageTransition";
+import { UserOutlined, HomeOutlined, CalendarOutlined, AreaChartOutlined, LineChartOutlined } from "@ant-design/icons";
+import { Line, Bar } from '@ant-design/plots';
+import AppLayout from "../components/AppLayout";
+import { getUserProfile, getAllUsers } from "../lib/userService";
+import { getAllRooms } from "../lib/roomService";
+import { getAllBookings } from "../lib/bookingService";
 
 const { Content, Header } = Layout;
 const { Title, Text, Paragraph } = Typography;
+const { TabPane } = Tabs;
 
 interface User {
-  id: number;
+  user_id: number;
   email: string;
   fullname: string;
   role: string;
-  status: string;
+  status?: string;
+  special_requests?: string;
+  profile_image?: string;
 }
 
 interface Statistics {
   userCount: number;
   roomCount: number;
+  bookingCount: number;
+  activeBookingCount: number;
+}
+
+interface BookingsByDay {
+  date: string;
+  count: number;
+  week: string;
+}
+
+interface UsersByDay {
+  date: string;
+  count: number;
+  week: string;
+}
+
+interface ChartData {
+  week: string;
+  count: number;
 }
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
-  const [stats, setStats] = useState<Statistics>({ userCount: 0, roomCount: 0 });
+  const [stats, setStats] = useState<Statistics>({ 
+    userCount: 0, 
+    roomCount: 0,
+    bookingCount: 0,
+    activeBookingCount: 0
+  });
+  const [bookingsByDay, setBookingsByDay] = useState<BookingsByDay[]>([]);
+  const [usersByDay, setUsersByDay] = useState<UsersByDay[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isChartLoading, setIsChartLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('overview');
   const { token } = theme.useToken();
 
   useEffect(() => {
@@ -42,21 +75,17 @@ const AdminDashboard = () => {
         return;
       }
 
-      const response = await axios.get<User>("/api/users/userinfobyid", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "x-api-key": import.meta.env.VITE_API_KEY,
-        },
-      });
+      const userData = await getUserProfile(token);
 
-      if (response.data.role.toLowerCase() !== "admin") {
+      if (userData.role.toLowerCase() !== "admin") {
         message.error("Unauthorized access");
         navigate("/");
         return;
       }
 
-      setUser(response.data);
+      setUser(userData);
     } catch (error) {
+      console.error("Error fetching admin profile:", error);
       message.error("Error fetching admin profile");
       navigate("/");
     } finally {
@@ -66,25 +95,173 @@ const AdminDashboard = () => {
 
   const fetchStatistics = async () => {
     try {
-      const [usersResponse, roomsResponse] = await Promise.all([
-        axios.get("/api/users/getallusers", {
-          headers: {
-            "x-api-key": import.meta.env.VITE_API_KEY,
-          },
-        }),
-        axios.get("/api/room/getallrooms", {
-          headers: {
-            "x-api-key": import.meta.env.VITE_API_KEY,
-          },
-        }),
+      const token = localStorage.getItem("token");
+      if (!token) {
+        navigate("/");
+        return;
+      }
+
+      // Fetch users, rooms, and bookings in parallel
+      const [usersResponse, roomsResponse, bookingsResponse] = await Promise.all([
+        getAllUsers(token),
+        getAllRooms(token),
+        getAllBookings(token, { limit: 1000 }) // Get more data for charts
       ]);
 
-      setStats({
-        userCount: usersResponse.data.length,
-        roomCount: roomsResponse.data.length,
+      console.log('Fetched data:', { 
+        users: usersResponse, 
+        rooms: roomsResponse, 
+        bookings: bookingsResponse 
       });
+
+      // Process raw data into statistics - Handle both array and object responses
+      const userCount = Array.isArray(usersResponse) ? usersResponse.length : 0;
+      
+      // Handle both formats of room response
+      const roomCount = roomsResponse?.rooms?.length || 
+                        (Array.isArray(roomsResponse) ? roomsResponse.length : 0);
+      
+      // Handle both formats of booking response
+      const bookings = bookingsResponse?.bookings || 
+                      (Array.isArray(bookingsResponse) ? bookingsResponse : []);
+      
+      const bookingCount = bookings.length;
+      
+      // Filter active bookings
+      const activeBookingCount = bookings.filter(
+        booking => ['Pending', 'Confirmed', 'Checked-in'].includes(booking.status)
+      ).length;
+
+      setStats({
+        userCount,
+        roomCount,
+        bookingCount,
+        activeBookingCount
+      });
+
+      console.log('Statistics:', { userCount, roomCount, bookingCount, activeBookingCount });
+
+      // Process booking data for charts - Only if we have bookings
+      if (bookings.length > 0) {
+        processBookingsForCharts(bookings);
+      } else {
+        setIsChartLoading(false);
+      }
+      
+      // Process user data for charts - Only if we have users
+      if (Array.isArray(usersResponse) && usersResponse.length > 0) {
+        processUsersForCharts(usersResponse);
+      }
+
     } catch (error) {
-      message.error("Error fetching statistics");
+      console.error("Error fetching statistics:", error);
+      message.error("Error fetching statistics. Please check the console for details.");
+      setIsChartLoading(false);
+    }
+  };
+  
+  // Process booking data into weekly aggregated format for charts
+  const processBookingsForCharts = (bookings: any[]) => {
+    setIsChartLoading(true);
+    try {
+      // Group bookings by date (creation date)
+      const bookingsByDate: { [key: string]: number } = {};
+      
+      // Add past 90 days for complete data visualization
+      for (let i = 90; i >= 0; i--) {
+        const date = new Date();
+        date.setDate(date.getDate() - i);
+        const dateString = date.toISOString().split('T')[0];
+        bookingsByDate[dateString] = 0;
+      }
+      
+      // Count bookings per day
+      bookings.forEach((booking: any) => {
+        const date = new Date(booking.created_at).toISOString().split('T')[0];
+        if (date in bookingsByDate) {
+          bookingsByDate[date]++;
+        } else {
+          bookingsByDate[date] = 1;
+        }
+      });
+      
+      // Convert to array and add week information
+      const chartData = Object.entries(bookingsByDate).map(([date, count]) => {
+        const dateObj = new Date(date);
+        const weekStart = new Date(dateObj);
+        weekStart.setDate(dateObj.getDate() - dateObj.getDay());
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6);
+        
+        const weekLabel = `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+        
+        return {
+          date,
+          count,
+          week: weekLabel
+        };
+      });
+      
+      // Sort by date
+      chartData.sort((a, b) => a.date.localeCompare(b.date));
+      
+      setBookingsByDay(chartData);
+    } catch (error) {
+      console.error('Error processing booking data for charts:', error);
+    } finally {
+      setIsChartLoading(false);
+    }
+  };
+  
+  // Process user data into weekly aggregated format for charts
+  const processUsersForCharts = (users: any[]) => {
+    try {
+      // Group users by registration date
+      const usersByDate: { [key: string]: number } = {};
+      
+      // Add past 90 days for complete data visualization
+      for (let i = 90; i >= 0; i--) {
+        const date = new Date();
+        date.setDate(date.getDate() - i);
+        const dateString = date.toISOString().split('T')[0];
+        usersByDate[dateString] = 0;
+      }
+      
+      // Count users per registration day
+      users.forEach((user: any) => {
+        if (!user.created_at) return;
+        
+        const date = new Date(user.created_at).toISOString().split('T')[0];
+        if (date in usersByDate) {
+          usersByDate[date]++;
+        } else {
+          usersByDate[date] = 1;
+        }
+      });
+      
+      // Convert to array and add week information
+      const chartData = Object.entries(usersByDate).map(([date, count]) => {
+        const dateObj = new Date(date);
+        const weekStart = new Date(dateObj);
+        weekStart.setDate(dateObj.getDate() - dateObj.getDay());
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6);
+        
+        const weekLabel = `${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+        
+        return {
+          date,
+          count,
+          week: weekLabel
+        };
+      });
+      
+      // Sort by date
+      chartData.sort((a, b) => a.date.localeCompare(b.date));
+      
+      setUsersByDay(chartData);
+    } catch (error) {
+      console.error('Error processing user data for charts:', error);
     }
   };
 
@@ -97,87 +274,312 @@ const AdminDashboard = () => {
   }
 
   return (
-    <Layout hasSider className="min-h-screen">
-      <Sidebar userRole="admin" userName={user?.fullname} />
-      <Layout>
-        <PageTransition>
-          <Header className="px-6 flex items-center justify-between bg-white">
-            <Title level={4} style={{ margin: 0, color: token.colorPrimary }}>
-              Admin Dashboard
-            </Title>
-          </Header>
-          <Content className="p-6" style={{ background: token.colorBgContainer }}>
-            <div className="max-w-6xl mx-auto">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <Card 
-                  className="shadow-md hover:shadow-lg transition-shadow"
-                  style={{ 
-                    background: token.colorBgContainer,
-                    borderColor: token.colorPrimary,
-                  }}
-                  headStyle={{ borderColor: token.colorBorderSecondary }}
-                  bodyStyle={{ background: token.colorBgContainer }}
-                >
-                  <Title level={5} style={{ color: token.colorPrimary, marginBottom: token.marginMD }}>
-                    Statistics Overview
-                  </Title>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="text-center p-4 rounded-lg" style={{ border: `1px solid ${token.colorBorder}` }}>
-                      <UserOutlined style={{ fontSize: '24px', color: token.colorPrimary, marginBottom: '8px' }} />
-                      <Paragraph style={{ color: token.colorText, margin: 0 }}>Total Users</Paragraph>
-                      <Title level={3} style={{ color: token.colorPrimary, margin: '8px 0 0 0' }}>
-                        {stats.userCount}
-                      </Title>
-                    </div>
-                    <div className="text-center p-4 rounded-lg" style={{ border: `1px solid ${token.colorBorder}` }}>
-                      <HomeOutlined style={{ fontSize: '24px', color: token.colorPrimary, marginBottom: '8px' }} />
-                      <Paragraph style={{ color: token.colorText, margin: 0 }}>Total Rooms</Paragraph>
-                      <Title level={3} style={{ color: token.colorPrimary, margin: '8px 0 0 0' }}>
-                        {stats.roomCount}
-                      </Title>
-                    </div>
+    <AppLayout userRole="admin" userName={user?.fullname}>
+      <Header className="px-6 flex items-center justify-between bg-white">
+        <Title level={4} style={{ margin: 0, color: token.colorPrimary }}>
+          Admin Dashboard
+        </Title>
+      </Header>
+      
+      <Content className="p-6" style={{ background: token.colorBgContainer }}>
+        <div className="max-w-6xl mx-auto">
+          <Tabs 
+            activeKey={activeTab} 
+            onChange={setActiveTab}
+            tabBarStyle={{ marginBottom: 24 }}
+          >
+            <TabPane 
+              tab={<span><AreaChartOutlined /> Overview</span>}
+              key="overview"
+            >
+              {/* Statistics Cards */}
+              <Row gutter={[16, 16]} className="mb-6">
+                <Col xs={24} sm={12} md={6}>
+                  <Card 
+                    className="shadow-md hover:shadow-lg transition-shadow"
+                    style={{ borderColor: token.colorPrimaryBorder }}
+                  >
+                    <Statistic
+                      title="Total Users"
+                      value={stats.userCount}
+                      prefix={<UserOutlined />}
+                      valueStyle={{ color: token.colorPrimary }}
+                    />
+                  </Card>
+                </Col>
+                <Col xs={24} sm={12} md={6}>
+                  <Card 
+                    className="shadow-md hover:shadow-lg transition-shadow"
+                    style={{ borderColor: token.colorPrimaryBorder }}
+                  >
+                    <Statistic
+                      title="Total Rooms"
+                      value={stats.roomCount}
+                      prefix={<HomeOutlined />}
+                      valueStyle={{ color: token.colorPrimary }}
+                    />
+                  </Card>
+                </Col>
+                <Col xs={24} sm={12} md={6}>
+                  <Card 
+                    className="shadow-md hover:shadow-lg transition-shadow"
+                    style={{ borderColor: token.colorPrimaryBorder }}
+                  >
+                    <Statistic
+                      title="Total Bookings"
+                      value={stats.bookingCount}
+                      prefix={<CalendarOutlined />}
+                      valueStyle={{ color: token.colorPrimary }}
+                    />
+                  </Card>
+                </Col>
+                <Col xs={24} sm={12} md={6}>
+                  <Card 
+                    className="shadow-md hover:shadow-lg transition-shadow"
+                    style={{ borderColor: token.colorPrimaryBorder }}
+                  >
+                    <Statistic
+                      title="Active Bookings"
+                      value={stats.activeBookingCount}
+                      prefix={<CalendarOutlined />}
+                      valueStyle={{ color: token.colorSuccess }}
+                    />
+                  </Card>
+                </Col>
+              </Row>
+              
+              {/* Chart Cards */}
+              <Row gutter={[16, 16]}>
+                <Col xs={24} md={12}>
+                  <Card 
+                    title="Bookings by Week"
+                    className="shadow-md transition-shadow"
+                    style={{ borderColor: token.colorBorderSecondary }}
+                  >
+                    {isChartLoading ? (
+                      <div className="h-64 flex items-center justify-center">
+                        <Spin />
+                      </div>
+                    ) : (
+                      <Line
+                        data={bookingsByDay}
+                        xField="date"
+                        yField="count"
+                        seriesField="week"
+                        xAxis={{
+                          type: 'time',
+                          tickCount: 5,
+                          label: {
+                            formatter: (v: string) => {
+                              const date = new Date(v);
+                              return `${date.getMonth() + 1}/${date.getDate()}`;
+                            }
+                          }
+                        }}
+                        tooltip={{
+                          formatter: (data: BookingsByDay) => {
+                            return {
+                              name: 'Bookings',
+                              value: data.count,
+                              title: new Date(data.date).toLocaleDateString()
+                            };
+                          }
+                        }}
+                        smooth={true}
+                        height={300}
+                        animation={{
+                          appear: {
+                            animation: 'path-in',
+                            duration: 1000,
+                          },
+                        }}
+                      />
+                    )}
+                  </Card>
+                </Col>
+                <Col xs={24} md={12}>
+                  <Card 
+                    title="User Registrations by Week"
+                    className="shadow-md transition-shadow"
+                    style={{ borderColor: token.colorBorderSecondary }}
+                  >
+                    {isChartLoading ? (
+                      <div className="h-64 flex items-center justify-center">
+                        <Spin />
+                      </div>
+                    ) : (
+                      <Line
+                        data={usersByDay}
+                        xField="date"
+                        yField="count"
+                        seriesField="week"
+                        xAxis={{
+                          type: 'time',
+                          tickCount: 5,
+                          label: {
+                            formatter: (v: string) => {
+                              const date = new Date(v);
+                              return `${date.getMonth() + 1}/${date.getDate()}`;
+                            }
+                          }
+                        }}
+                        tooltip={{
+                          formatter: (data: UsersByDay) => {
+                            return {
+                              name: 'New Users',
+                              value: data.count,
+                              title: new Date(data.date).toLocaleDateString()
+                            };
+                          }
+                        }}
+                        smooth={true}
+                        height={300}
+                        animation={{
+                          appear: {
+                            animation: 'path-in',
+                            duration: 1000,
+                          },
+                        }}
+                      />
+                    )}
+                  </Card>
+                </Col>
+              </Row>
+            </TabPane>
+            
+            <TabPane 
+              tab={<span><LineChartOutlined /> Booking Analytics</span>}
+              key="booking-analytics"
+            >
+              <Card>
+                <Title level={5}>Weekly Booking Trends</Title>
+                <Paragraph type="secondary">
+                  Aggregate view of bookings grouped by week (UTC+8 timezone)
+                </Paragraph>
+                
+                {isChartLoading ? (
+                  <div className="h-96 flex items-center justify-center">
+                    <Spin size="large" />
                   </div>
-                </Card>
-
-                <Card 
-                  className="shadow-md hover:shadow-lg transition-shadow"
-                  style={{ 
-                    background: token.colorBgContainer,
-                    borderColor: token.colorPrimary,
-                  }}
-                  headStyle={{ borderColor: token.colorBorderSecondary }}
-                  bodyStyle={{ background: token.colorBgContainer }}
-                >
-                  <Title level={5} style={{ color: token.colorPrimary, marginBottom: token.marginMD }}>
-                    System Overview
-                  </Title>
-                  <div className="space-y-2">
-                    <div>
-                      <Text style={{ color: token.colorTextSecondary }}>User Role:</Text>
-                      <Text style={{ marginLeft: 8, color: token.colorText, textTransform: 'capitalize' }}>
-                        {user?.role}
-                      </Text>
-                    </div>
-                    <div>
-                      <Text style={{ color: token.colorTextSecondary }}>Access Level:</Text>
-                      <Text style={{ marginLeft: 8, color: token.colorText }}>
-                        Administrator
-                      </Text>
-                    </div>
-                    <div>
-                      <Text style={{ color: token.colorTextSecondary }}>Last Login:</Text>
-                      <Text style={{ marginLeft: 8, color: token.colorText }}>
-                        {new Date().toLocaleString()}
-                      </Text>
-                    </div>
+                ) : (
+                  <Bar
+                    data={
+                      // Aggregate by week
+                      bookingsByDay.reduce<ChartData[]>((acc, item) => {
+                        const weekEntry = acc.find(w => w.week === item.week);
+                        if (weekEntry) {
+                          weekEntry.count += item.count;
+                        } else {
+                          acc.push({ week: item.week, count: item.count });
+                        }
+                        return acc;
+                      }, [])
+                    }
+                    xField="week"
+                    yField="count"
+                    label={{
+                      position: 'middle',
+                      style: {
+                        fill: '#FFFFFF',
+                        opacity: 0.6,
+                      },
+                    }}
+                    xAxis={{
+                      label: {
+                        autoHide: true,
+                        autoRotate: true,
+                        style: {
+                          maxWidth: 100,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis'
+                        }
+                      },
+                      tickCount: 6
+                    }}
+                    meta={{
+                      count: {
+                        alias: 'Number of Bookings',
+                      },
+                    }}
+                    height={400}
+                    color={token.colorPrimary}
+                    autoFit={true}
+                    scrollbar={{
+                      type: 'horizontal'
+                    }}
+                  />
+                )}
+              </Card>
+            </TabPane>
+            
+            <TabPane 
+              tab={<span><UserOutlined /> User Analytics</span>}
+              key="user-analytics"
+            >
+              <Card>
+                <Title level={5}>Weekly User Registration Trends</Title>
+                <Paragraph type="secondary">
+                  Aggregate view of user registrations grouped by week (UTC+8 timezone)
+                </Paragraph>
+                
+                {isChartLoading ? (
+                  <div className="h-96 flex items-center justify-center">
+                    <Spin size="large" />
                   </div>
-                </Card>
-              </div>
-            </div>
-          </Content>
-        </PageTransition>
-      </Layout>
-    </Layout>
+                ) : (
+                  <Bar
+                    data={
+                      // Aggregate by week
+                      usersByDay.reduce<ChartData[]>((acc, item) => {
+                        const weekEntry = acc.find(w => w.week === item.week);
+                        if (weekEntry) {
+                          weekEntry.count += item.count;
+                        } else {
+                          acc.push({ week: item.week, count: item.count });
+                        }
+                        return acc;
+                      }, [])
+                    }
+                    xField="week"
+                    yField="count"
+                    label={{
+                      position: 'middle',
+                      style: {
+                        fill: '#FFFFFF',
+                        opacity: 0.6,
+                      },
+                    }}
+                    xAxis={{
+                      label: {
+                        autoHide: true,
+                        autoRotate: true,
+                        style: {
+                          maxWidth: 100,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis'
+                        }
+                      },
+                      tickCount: 6
+                    }}
+                    meta={{
+                      count: {
+                        alias: 'Number of Registrations',
+                      },
+                    }}
+                    height={400}
+                    color={token.colorSuccess}
+                    autoFit={true}
+                    scrollbar={{
+                      type: 'horizontal'
+                    }}
+                  />
+                )}
+              </Card>
+            </TabPane>
+          </Tabs>
+        </div>
+      </Content>
+    </AppLayout>
   );
 };
 

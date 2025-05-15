@@ -1,0 +1,352 @@
+/* Dark Mode Styles */
+:root {
+  /* Light mode variables */
+  --app-background: #f5f5f5;
+  --app-text: #000000;
+  --card-background: #ffffff;
+  --border-color: #d9d9d9;
+  --highlight-color: #2C1810;
+  --highlight-hover: #3D2317;
+  --inactive-tab-color: rgba(0, 0, 0, 0.65);  /* Darker for better visibility */
+  --secondary-text-color: rgba(0, 0, 0, 0.65);
+  
+  /* Dark mode variables */
+  --app-background-dark: #121212;
+  --app-text-dark: #ffffff;
+  --card-background-dark: #1e1e1e;
+  --border-color-dark: #444444;
+  --inactive-tab-color-dark: rgba(255, 255, 255, 0.75);  /* Brighter for better visibility */
+  --secondary-text-dark: rgba(255, 255, 255, 0.85);
+  
+  /* Common variables */
+  --danger-button-text: #ff4d4f;
+  --danger-button-text-dark: #ff7875;
+  --button-text-on-brown: #ffffff;
+  --sidebar-username-color: #ffffff;
+  --gold-color: #D4AF37;
+  --gold-color-hover: #e5c158;
+}
+
+/* Login page specific styles - prevent background from being affected by dark mode */
+.login-page-bg {
+  background-image: var(--login-bg-image) !important;
+  filter: brightness(0.7) contrast(1.1) !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  z-index: 0 !important;
+}
+
+/* Light mode explicit reset to ensure nothing from dark mode remains */
+body:not(.dark-mode) {
+  color: var(--app-text) !important;
+  background-color: var(--app-background) !important;
+}
+
+/* Exclude login layout from background color override */
+body:not(.dark-mode) .login-layout {
+  background-color: transparent !important;
+}
+
+body:not(.dark-mode) .ant-card {
+  background-color: var(--card-background) !important;
+  color: var(--app-text) !important;
+  border-color: var(--border-color) !important;
+}
+
+body:not(.dark-mode) .ant-typography {
+  color: var(--app-text) !important;
+}
+
+body:not(.dark-mode) .ant-typography.ant-typography-secondary {
+  color: var(--secondary-text-color) !important;
+}
+
+body:not(.dark-mode) .ant-layout {
+  background-color: var(--app-background) !important;
+}
+
+/* Exclude login layout from background color override */
+body:not(.dark-mode) .login-layout {
+  background-color: transparent !important;
+}
+
+body:not(.dark-mode) .ant-layout-content {
+  background-color: var(--app-background) !important;
+}
+
+/* Exclude login page content from background color override */
+body:not(.dark-mode) .login-layout .ant-layout-content {
+  background-color: transparent !important;
+}
+
+body:not(.dark-mode) .ant-layout-header {
+  background-color: var(--card-background) !important;
+}
+
+body:not(.dark-mode) .ant-collapse {
+  background-color: var(--card-background) !important;
+  border-color: var(--border-color) !important;
+}
+
+body:not(.dark-mode) .ant-collapse-header {
+  color: var(--app-text) !important;
+}
+
+body:not(.dark-mode) .ant-collapse-content {
+  background-color: var(--card-background) !important;
+  color: var(--app-text) !important;
+}
+
+body:not(.dark-mode) .ant-btn {
+  color: var(--app-text) !important;
+  border-color: var(--border-color) !important;
+}
+
+body:not(.dark-mode) .ant-btn-dangerous {
+  color: var(--danger-button-text) !important;
+  border-color: var(--danger-button-text) !important;
+}
+
+body:not(.dark-mode) .ant-tabs-tab {
+  color: var(--inactive-tab-color) !important;
+}
+
+body:not(.dark-mode) .ant-tabs-tab-active {
+  color: var(--highlight-color) !important;
+}
+
+body:not(.dark-mode) .ant-tag {
+  border-color: var(--border-color) !important;
+}
+
+body:not(.dark-mode) .ant-input {
+  border-color: var(--border-color) !important;
+  background-color: var(--card-background) !important;
+}
+
+body:not(.dark-mode) .ant-input-affix-wrapper {
+  border-color: var(--border-color) !important;
+  background-color: var(--card-background) !important;
+}
+
+body:not(.dark-mode) .ant-select:not(.ant-select-customize-input) .ant-select-selector {
+  background-color: var(--card-background) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Better contrast for buttons with brown backgrounds in any mode */
+.bg-\[\#2C1810\], 
+.hover\:bg-\[\#3D2317\]:hover,
+.ant-btn.bg-\[\#2C1810\],
+.ant-btn.hover\:bg-\[\#3D2317\]:hover,
+.ant-btn-primary.bg-\[\#2C1810\],
+button.bg-\[\#2C1810\],
+.ant-btn.ant-btn-primary {
+  color: var(--button-text-on-brown) !important;
+  border: none !important;
+}
+
+/* Ensure text on dark backgrounds is always white regardless of theme */
+.bg-\[\#2C1810\] *,
+.hover\:bg-\[\#3D2317\]:hover *,
+div.bg-\[\#2C1810\] .ant-typography,
+div.bg-\[\#3D2317\] .ant-typography,
+.ant-layout-sider .ant-typography {
+  color: var(--button-text-on-brown) !important;
+}
+
+/* Add bright styling for specific elements with hard-to-see text */
+.text-on-dark,
+.text-on-dark * {
+  color: var(--button-text-on-brown) !important;  
+}
+
+/* Username in sidebar */
+.ant-layout-sider .username-text {
+  color: var(--sidebar-username-color) !important;
+  opacity: 0.9 !important;
+  font-weight: 400 !important;
+}
+
+/* Dark mode styles */
+body.dark-mode {
+  background-color: var(--app-background-dark) !important;
+  color: var(--app-text-dark) !important;
+}
+
+/* Exclude login layout from background color override */
+body.dark-mode .login-layout {
+  background-color: transparent !important;
+}
+
+/* Adjust Ant Design components for dark mode */
+body.dark-mode .ant-card {
+  background-color: var(--card-background-dark) !important;
+  color: var(--app-text-dark) !important;
+  border-color: var(--border-color-dark) !important;
+}
+
+body.dark-mode .ant-typography {
+  color: var(--app-text-dark) !important;
+}
+
+body.dark-mode .ant-typography.ant-typography-secondary {
+  color: var(--secondary-text-dark) !important;
+}
+
+body.dark-mode .ant-layout {
+  background-color: var(--app-background-dark) !important;
+}
+
+/* Exclude login layout from background color override */
+body.dark-mode .login-layout {
+  background-color: transparent !important;
+}
+
+body.dark-mode .ant-layout-content {
+  background-color: var(--app-background-dark) !important;
+}
+
+/* Exclude login page content from background color override */
+body.dark-mode .login-layout .ant-layout-content {
+  background-color: transparent !important;
+}
+
+body.dark-mode .ant-layout-header {
+  background-color: var(--card-background-dark) !important;
+}
+
+body.dark-mode .ant-collapse {
+  background-color: var(--card-background-dark) !important;
+  border-color: var(--border-color-dark) !important;
+}
+
+body.dark-mode .ant-collapse-header {
+  color: var(--app-text-dark) !important;
+}
+
+body.dark-mode .ant-collapse-content {
+  background-color: var(--card-background-dark) !important;
+  color: var(--app-text-dark) !important;
+}
+
+body.dark-mode .ant-btn {
+  border-color: var(--border-color-dark) !important;
+  color: var(--app-text-dark) !important;
+  background-color: transparent !important;
+}
+
+/* Make Delete Account button more visible in dark mode */
+body.dark-mode .ant-btn-dangerous {
+  color: var(--danger-button-text-dark) !important;
+  border-color: var(--danger-button-text-dark) !important;
+}
+
+body.dark-mode .ant-form-item-label > label {
+  color: var(--app-text-dark) !important;
+}
+
+body.dark-mode .ant-select-selector {
+  background-color: var(--card-background-dark) !important;
+  color: var(--app-text-dark) !important;
+  border-color: var(--border-color-dark) !important;
+}
+
+body.dark-mode .ant-select-arrow {
+  color: var(--app-text-dark) !important;
+}
+
+body.dark-mode .ant-select-item {
+  background-color: var(--card-background-dark) !important;
+  color: var(--app-text-dark) !important;
+}
+
+body.dark-mode .ant-select-dropdown {
+  background-color: var(--card-background-dark) !important;
+  border-color: var(--border-color-dark) !important;
+}
+
+body.dark-mode .ant-menu {
+  background-color: var(--card-background-dark) !important;
+  color: var(--app-text-dark) !important;
+}
+
+body.dark-mode .ant-menu-item {
+  color: var(--app-text-dark) !important;
+}
+
+body.dark-mode .ant-menu-item-selected {
+  background-color: #333333 !important;
+}
+
+/* Text fields in dark mode */
+body.dark-mode .ant-input {
+  background-color: #2d2d2d !important;
+  border-color: var(--border-color-dark) !important;
+  color: var(--app-text-dark) !important;
+}
+
+body.dark-mode .ant-input-affix-wrapper {
+  background-color: #2d2d2d !important;
+  border-color: var(--border-color-dark) !important;
+  color: var(--app-text-dark) !important;
+}
+
+body.dark-mode .ant-input-affix-wrapper .ant-input {
+  background-color: transparent !important;
+}
+
+/* Improve tag visibility in dark mode */
+body.dark-mode .ant-tag {
+  border-color: #666 !important;
+  color: #fff !important;
+}
+
+/* Make inactive tabs more visible in dark mode */
+body.dark-mode .ant-tabs-tab {
+  color: var(--inactive-tab-color-dark) !important;
+}
+
+body.dark-mode .ant-tabs-tab-active {
+  color: var(--gold-color) !important;
+}
+
+body.dark-mode .ant-tabs-ink-bar {
+  background-color: var(--gold-color) !important;
+}
+
+/* Gold accent color for important elements in dark mode */
+body.dark-mode .ant-btn-primary {
+  background-color: var(--gold-color) !important;
+  border-color: var(--gold-color) !important;
+  color: #000 !important; /* Dark text on gold for better contrast */
+}
+
+body.dark-mode .ant-btn-primary:hover {
+  background-color: var(--gold-color-hover) !important;
+  border-color: var(--gold-color-hover) !important;
+}
+
+/* Custom styles for the dark mode switch */
+.dark-mode-switch .ant-switch-checked {
+  background-color: var(--gold-color) !important;
+}
+
+/* Custom styles for the recommendation switch */
+.recommendation-switch .ant-switch-checked {
+  background-color: var(--gold-color) !important;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+  .ant-collapse-header {
+    padding: 8px 16px !important;
+  }
+  
+  .ant-collapse-content-box {
+    padding: 8px 16px !important;
+  }
+} 

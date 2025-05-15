@@ -1,12 +1,11 @@
 import { useState, useEffect, ChangeEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Input, Card, Form, message, Upload as AntUpload, Typography, Layout, Alert, Modal } from "antd";
-import { EyeOutlined, EyeInvisibleOutlined, UploadOutlined } from "@ant-design/icons";
+import { Button, Input, Card, Form, message, Upload as AntUpload, Typography, Layout, Alert, Modal, Spin } from "antd";
+import { EyeOutlined, EyeInvisibleOutlined, UploadOutlined, LoadingOutlined } from "@ant-design/icons";
 import type { RcFile, UploadFile, UploadProps } from 'antd/es/upload/interface';
-import axios from "axios";
-import Sidebar from "../components/Sidebar";
-import PageTransition from "../components/PageTransition";
+import AppLayout from "../components/AppLayout";
 import { uploadProfileImage, getProfileImage } from '../lib/cloudinaryService';
+import { getUserProfile, updateUserProfile } from '../lib/userService';
 
 const { Content } = Layout;
 const { Title, Text } = Typography;
@@ -34,6 +33,7 @@ const Profile = () => {
   const [profileError, setProfileError] = useState<string | null>(null);
   const [isSaveModalVisible, setIsSaveModalVisible] = useState(false);
   const [formValues, setFormValues] = useState<any>(null);
+  const [uploadingImage, setUploadingImage] = useState<boolean>(false);
 
   useEffect(() => {
     fetchUserProfile();
@@ -44,6 +44,26 @@ const Profile = () => {
       }
     };
   }, []);
+  
+  // Additional effect to update the form when user data changes
+  useEffect(() => {
+    if (user) {
+      // Format phone number - remove +63 prefix from the start if present
+      const rawPhoneNumber = user.phone_number || '';
+      const phoneNumber = rawPhoneNumber.replace(/^\+63/, '').trim();
+      
+      // Ensure form fields are set with current user data
+      form.setFieldsValue({
+        userId: user.user_id,
+        email: user.email,
+        phone_number: phoneNumber,
+        special_requests: user.special_requests || '',
+        // Split fullname into firstname and lastname for the form
+        firstname: user.fullname?.split(' ')[0] || '',
+        lastname: user.fullname?.split(' ').slice(1).join(' ') || ''
+      });
+    }
+  }, [user, form]);
 
   // Add useEffect to monitor form values
   useEffect(() => {
@@ -52,120 +72,103 @@ const Profile = () => {
   }, [form.getFieldsValue()]);
 
   const fetchUserProfile = async () => {
+    console.log('fetchUserProfile called');
     try {
       const token = localStorage.getItem('token');
+      console.log('Token exists:', token ? 'Yes' : 'No');
+      
       if (!token) {
+        console.log('No token found, redirecting to login');
         navigate("/");
         return;
       }
 
-      const response = await axios.get("/api/users/userinfobyid", {
-        headers: {
-          "x-api-key": import.meta.env.VITE_API_KEY,
-          "Authorization": `Bearer ${token}`
-        }
-      });
-      console.log("API Response:", response.data);
-      setUser(response.data);
+      console.log('Calling getUserProfile service function');
+      const userData = await getUserProfile(token);
+      console.log('getUserProfile returned data:', userData);
+      
+      setUser(userData);
+      console.log('User state set with:', userData);
 
       // Split fullname into firstname and lastname
-      const nameParts = response.data.fullname?.split(' ') || ['', ''];
+      const nameParts = userData.fullname?.split(' ') || ['', ''];
       const firstname = nameParts[0] || '';
       const lastname = nameParts.slice(1).join(' ') || '';
+      console.log('Name parts:', { firstname, lastname });
 
       // Format phone number - remove +63 prefix and any spaces
-      const rawPhoneNumber = response.data.phone_number || '';
-      console.log("Raw Phone Number:", rawPhoneNumber);
-      const phoneNumber = rawPhoneNumber.replace('+63', '').trim();
-      console.log("Formatted Phone Number:", phoneNumber);
+      const rawPhoneNumber = userData.phone_number || '';
+      const phoneNumber = rawPhoneNumber.replace(/^\+63/, '').trim();
+      console.log('Phone number formatted:', phoneNumber);
 
       // Set form values individually to ensure they are set correctly
-      form.setFieldValue('userId', response.data.user_id);
-      form.setFieldValue('email', response.data.email);
+      form.setFieldValue('userId', userData.user_id);
+      form.setFieldValue('email', userData.email);
       form.setFieldValue('password', '');
       form.setFieldValue('firstname', firstname);
       form.setFieldValue('lastname', lastname);
       form.setFieldValue('phone_number', phoneNumber);
-      form.setFieldValue('special_requests', response.data.special_requests || '');
+      form.setFieldValue('special_requests', userData.special_requests || '');
+      console.log('Form values set');
 
-      // Log current form values
-      const currentValues = form.getFieldsValue();
-      console.log("Current Form Values:", currentValues);
-
-      // Set default first
-      setImagePreview(DEFAULT_PROFILE_IMAGE);
-
-      // Only try to fetch image if we have a user_id
-      if (response.data.user_id) {
-        try {
-          // Use our new cloudinaryService to get profile image
-          const imageResult = await getProfileImage(response.data.user_id);
-          
-          if (imageResult.imageUrl) {
-            setImagePreview(imageResult.imageUrl);
-          }
-        } catch (imageError) {
-          console.log("No profile image found or error loading image:", imageError);
-        }
+      // Set profile image preview if it exists in user data
+      if (userData.profile_image) {
+        setImagePreview(userData.profile_image);
+        console.log('Setting image preview to user profile image:', userData.profile_image);
+      } else {
+        // Set default first
+        setImagePreview(DEFAULT_PROFILE_IMAGE);
+        console.log('No profile image, using default');
       }
     } catch (error: any) {
+      console.error('Error in fetchUserProfile:', error);
       if (error.response?.status === 401) {
         message.error("Session expired. Please login again.");
         navigate("/");
       } else if (error.response?.data?.message) {
         setProfileError(error.response.data.message);
+        console.error('Profile error set to:', error.response.data.message);
       } else if (error.message.includes("Network Error")) {
         setProfileError("Unable to connect to server. Please check your internet connection.");
+        console.error('Network error detected');
       } else {
         setProfileError("Error fetching profile. Please try again later.");
+        console.error('Generic error set');
       }
     }
   };
 
   const handleImageChange = async (info: any) => {
-    if (!info || !info.file) {
-      message.error("Failed to process image. Please try again.");
-      return;
-    }
-
-    const file = info.file;
-
-    // Check file type
-    if (!file.type || !file.type.startsWith('image/')) {
-      message.error("Please select an image file (JPEG, PNG, etc.)");
+    if (info.file && info.file.status === 'uploading') {
+      // Show uploading state
+      setUploadingImage(true);
       return;
     }
     
-    // Check file size (10MB limit)
-    if (file.size > 10 * 1024 * 1024) {
-      message.error("Image size should be less than 10MB");
-      return;
+    if (info.file && info.file.status === 'done') {
+      const file = info.file.originFileObj;
+      if (!file) {
+        setUploadingImage(false);
+        return;
+      }
+      
+      // Preview the image locally before upload
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        if (e.target && e.target.result) {
+          setImagePreview(e.target.result as string);
+        }
+      };
+      reader.readAsDataURL(file);
+      
+      // Store the file for later uploading when form is submitted
+      setImageFile(file);
+      setUploadingImage(false);
     }
-
-    try {
-      // Clean up previous preview URL if it exists
-      if (imagePreview && imagePreview !== DEFAULT_PROFILE_IMAGE) {
-        URL.revokeObjectURL(imagePreview);
-      }
-
-      // Get the actual file object
-      const fileObj = file instanceof File ? file : file.originFileObj;
-      
-      if (!fileObj) {
-        throw new Error("Could not get valid file object");
-      }
-
-      // Create new preview URL
-      const previewUrl = URL.createObjectURL(fileObj);
-      
-      // Update state
-      setImageFile(fileObj);
-      setImagePreview(previewUrl);
-      
-      message.success("Image selected successfully");
-    } catch (error) {
-      console.error("Error processing image:", error);
-      message.error("Failed to process image. Please try again.");
+    
+    if (info.file && info.file.status === 'error') {
+      message.error('Error loading image. Please try again.');
+      setUploadingImage(false);
     }
   };
 
@@ -187,7 +190,6 @@ const Profile = () => {
     const value = e.target.value.replace(/\D/g, '');
     if (value.length <= 10) {
       form.setFieldValue('phone_number', value);
-      console.log("Phone number updated:", value);
     }
   };
 
@@ -202,6 +204,7 @@ const Profile = () => {
         throw new Error("Authentication token not found");
       }
 
+      setUploadingImage(true);
       message.loading({ content: "Uploading image...", key: "imageUpload" });
       
       // Use our improved Cloudinary service to upload profile image
@@ -217,6 +220,8 @@ const Profile = () => {
       message.error({ content: error.message || "Failed to upload image", key: "imageUpload" });
       console.error("Image upload error:", error);
       throw error;
+    } finally {
+      setUploadingImage(false);
     }
   };
 
@@ -251,65 +256,89 @@ const Profile = () => {
         return;
       }
 
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error("Authentication token not found");
+      }
+
+      // Prepare the update data
+      const updateData = {
+        userId: user?.user_id,
+        fullname: `${values.firstname} ${values.lastname}`.trim(),
+        phone_number: `+63${phoneNumber}`,
+        special_requests: values.special_requests || null,
+        ...(values.password && { password: values.password }),
+      };
+
+      console.log('Starting profile update with data:', updateData);
+
+      // First handle image upload if there's a new image
       let imageUrl = null;
       if (imageFile) {
         try {
-          imageUrl = await uploadImage();
+          console.log('Uploading new profile image');
+          message.loading({ content: "Uploading image...", key: "imageUpload" });
+          
+          // Upload image to Cloudinary
+          imageUrl = await uploadProfileImage(imageFile, user?.user_id!, token);
+          
+          if (imageUrl) {
+            message.success({ content: "Image uploaded successfully!", key: "imageUpload" });
+            console.log('Profile image updated successfully:', imageUrl);
+            
+            // Update the preview with the new image URL
+            setImagePreview(imageUrl);
+            
+            // Add image URL to update data
+            updateData.profile_image = imageUrl;
+          } else {
+            message.error({ content: "Failed to upload image, but will continue with profile update", key: "imageUpload" });
+          }
         } catch (uploadError: any) {
-          // The error message is already displayed by the uploadImage function
-          setIsLoading(false);
-          return;
+          message.error({ content: uploadError.message || "Failed to upload image", key: "imageUpload" });
+          console.error("Image upload error:", uploadError);
+          // Continue with profile update even if image upload fails
         }
       }
 
-      interface UpdateData {
-        userId: number | undefined;
-        fullname: string;
-        role: string | undefined;
-        access_level: string;
-        phone_number: string;
-        special_requests: any;
-        profile_image?: string;
-        [key: string]: any; // Allow additional properties
+      // Then update the profile data
+      console.log('Updating profile with data:', updateData);
+      const updatedUser = await updateUserProfile(updateData, token);
+      console.log('Profile updated successfully:', updatedUser);
+      
+      // Update user state with the updated user data
+      if (updatedUser && updatedUser.user) {
+        setUser(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            ...updatedUser.user,
+            // Ensure profile_image is set from our upload if it was successful
+            ...(imageUrl && { profile_image: imageUrl })
+          };
+        });
+        
+        message.success("Profile updated successfully!");
+      } else {
+        console.warn("User data not returned from update call:", updatedUser);
+        message.success("Profile information updated");
       }
-
-      const updateData: UpdateData = {
-        userId: user?.user_id,
-        fullname: `${values.firstname} ${values.lastname}`.trim(),
-        role: user?.role,
-        access_level: "1",
-        phone_number: `+63${phoneNumber}`,
-        special_requests: values.special_requests || null,
-        ...(imageUrl && { profile_image: imageUrl }),
-      };
-
-      // Remove firstname and lastname from updateData as they're not needed by the API
-      delete updateData.firstname;
-      delete updateData.lastname;
-
-      if (!updateData.password) {
-        delete updateData.password;
-      }
-
-      console.log("Sending update data:", updateData);
-
-      const response = await axios.put(
-        `/api/users/update-user`,
-        updateData,
-        {
-          headers: {
-            'x-api-key': import.meta.env.VITE_API_KEY,
-          },
-        }
-      );
-
-      message.success("Profile updated successfully!");
+      
+      // Reset image file state after upload attempt
       setImageFile(null);
-      await fetchUserProfile();
+      
+      // Refresh the profile data to ensure consistency
+      fetchUserProfile();
+      
     } catch (error: any) {
+      console.error("Error updating profile:", error);
+      
       if (error.response?.status === 401) {
         message.error("Session expired. Please login again.");
         navigate("/");
+      } else if (error.response?.status === 404) {
+        message.error("Profile update service not available. Please try again later.");
+        console.error("API endpoint not found:", error.config?.url);
       } else if (error.response?.data?.message) {
         setProfileError(error.response.data.message);
       } else if (error.message.includes("Network Error")) {
@@ -317,172 +346,174 @@ const Profile = () => {
       } else {
         setProfileError("Error updating profile. Please try again later.");
       }
-      console.error("Error updating profile:", error);
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <Layout hasSider className="min-h-screen">
-      <Sidebar userRole="guest" userName={user?.fullname} />
-      <Layout className="bg-[#F5F5F5]">
-        <PageTransition>
-          <Content className="p-6 mx-auto w-full max-w-4xl">
-            <Card 
-              className="shadow-md" 
-              style={{ borderColor: '#D4AF37' }}
-              title={<Title level={3} style={{ color: '#2C1810', margin: 0 }}>Edit Profile</Title>}
-            >
-              <Form
-                form={form}
-                layout="vertical"
-                onFinish={showSaveConfirmation}
-                className="space-y-6"
-              >
-                {profileError && (
-                  <Alert
-                    message={profileError}
-                    type="error"
-                    showIcon
-                    className="mb-4"
-                  />
+    <AppLayout userRole="guest" userName={user?.fullname}>
+      <Content className="p-6 mx-auto w-full max-w-4xl bg-[#F5F5F5]">
+        <Card 
+          className="shadow-md" 
+          style={{ borderColor: '#D4AF37' }}
+          title={<Title level={3} style={{ color: '#2C1810', margin: 0 }}>Edit Profile</Title>}
+        >
+          <Form
+            form={form}
+            layout="vertical"
+            onFinish={showSaveConfirmation}
+            className="space-y-6"
+          >
+            {profileError && (
+              <Alert
+                message={profileError}
+                type="error"
+                showIcon
+                className="mb-4"
+              />
+            )}
+
+            {/* Profile Image */}
+            <div className="flex flex-col items-center space-y-4">
+              <div className="relative w-32 h-32">
+                {uploadingImage && (
+                  <div className="absolute inset-0 bg-black bg-opacity-50 rounded-full flex items-center justify-center z-10">
+                    <Spin indicator={<LoadingOutlined style={{ fontSize: 32, color: '#D4AF37' }} spin />} />
+                  </div>
                 )}
+                <img
+                  src={imagePreview}
+                  alt="Profile"
+                  className="w-full h-full rounded-full object-cover border-2 border-[#D4AF37]"
+                  onError={() => {
+                    if (imagePreview !== DEFAULT_PROFILE_IMAGE) {
+                      setImagePreview(DEFAULT_PROFILE_IMAGE);
+                    }
+                  }}
+                />
+                <AntUpload
+                  accept="image/*"
+                  showUploadList={false}
+                  beforeUpload={beforeUpload}
+                  onChange={handleImageChange}
+                  disabled={uploadingImage}
+                  customRequest={({ file, onSuccess }) => {
+                    setTimeout(() => {
+                      onSuccess?.("ok");
+                    }, 0);
+                  }}
+                >
+                  <Button
+                    type="text"
+                    icon={uploadingImage ? <LoadingOutlined /> : <UploadOutlined />}
+                    className="absolute bottom-0 right-0 bg-[#2C1810] p-2 rounded-full cursor-pointer hover:bg-[#3D2317] text-white"
+                    disabled={uploadingImage}
+                  />
+                </AntUpload>
+              </div>
+            </div>
 
-                {/* Profile Image */}
-                <div className="flex flex-col items-center space-y-4">
-                  <div className="relative w-32 h-32">
-                    <img
-                      src={imagePreview}
-                      alt="Profile"
-                      className="w-full h-full rounded-full object-cover border-2 border-[#D4AF37]"
-                      onError={() => {
-                        if (imagePreview !== DEFAULT_PROFILE_IMAGE) {
-                          setImagePreview(DEFAULT_PROFILE_IMAGE);
-                        }
-                      }}
-                    />
-                    <AntUpload
-                      accept="image/*"
-                      showUploadList={false}
-                      beforeUpload={beforeUpload}
-                      onChange={handleImageChange}
-                      customRequest={({ file, onSuccess }) => {
-                        setTimeout(() => {
-                          onSuccess?.("ok");
-                        }, 0);
-                      }}
-                    >
-                      <Button
-                        type="text"
-                        icon={<UploadOutlined />}
-                        className="absolute bottom-0 right-0 bg-[#2C1810] p-2 rounded-full cursor-pointer hover:bg-[#3D2317] text-white"
-                      />
-                    </AntUpload>
+            {/* Form Fields */}
+            <div className="space-y-4">
+              <Form.Item
+                label={<Text>Email</Text>}
+                name="email"
+              >
+                <Input 
+                  className="border-[#D4AF37] focus:ring-[#2C1810]"
+                  disabled={true}
+                />
+              </Form.Item>
+
+              <Form.Item
+                label={<Text>New Password (Optional)</Text>}
+                name="password"
+              >
+                <Input.Password
+                  placeholder="Leave blank to keep current password"
+                  className="border-[#D4AF37] focus:ring-[#2C1810]"
+                  iconRender={(visible) => (visible ? <EyeOutlined /> : <EyeInvisibleOutlined />)}
+                />
+              </Form.Item>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Form.Item
+                  label={<Text>First Name</Text>}
+                  name="firstname"
+                  rules={[{ required: true, message: 'Please input your first name!' }]}
+                >
+                  <Input 
+                    className="border-[#D4AF37] focus:ring-[#2C1810]"
+                    placeholder="Enter your first name"
+                  />
+                </Form.Item>
+
+                <Form.Item
+                  label={<Text>Last Name</Text>}
+                  name="lastname"
+                  rules={[{ required: true, message: 'Please input your last name!' }]}
+                >
+                  <Input 
+                    className="border-[#D4AF37] focus:ring-[#2C1810]"
+                    placeholder="Enter your last name"
+                  />
+                </Form.Item>
+              </div>
+
+              <Form.Item
+                label={<Text>Phone Number</Text>}
+                name="phone_number"
+                rules={[
+                  { required: true, message: 'Please input your phone number!' },
+                  { min: 10, message: 'Phone number must be 10 digits!' },
+                  { pattern: /^[0-9]+$/, message: 'Phone number can only contain numbers!' }
+                ]}
+              >
+                <div className="relative flex items-center">
+                  <div className="absolute left-0 top-0 bottom-0 flex items-center justify-center bg-gray-100 text-black font-medium w-12 border-r rounded-l border-[#D4AF37] z-[1]">
+                    +63
                   </div>
+                  <Input
+                    type="text"
+                    placeholder="9123456789"
+                    onChange={handlePhoneNumberChange}
+                    className="border-[#D4AF37] focus:ring-[#2C1810] pl-12"
+                    maxLength={10}
+                    onKeyPress={(e) => {
+                      if (!/[0-9]/.test(e.key)) {
+                        e.preventDefault();
+                      }
+                    }}
+                    style={{ paddingLeft: '48px' }}
+                  />
                 </div>
+                <Text type="secondary" className="text-xs mt-1">Enter your 10-digit phone number without the country code</Text>
+              </Form.Item>
 
-                {/* Form Fields */}
-                <div className="space-y-4">
-                  <Form.Item
-                    label={<Text>Email</Text>}
-                    name="email"
-                  >
-                    <Input 
-                      className="border-[#D4AF37] focus:ring-[#2C1810]"
-                      disabled={true}
-                    />
-                  </Form.Item>
+              <Form.Item
+                label={<Text>Special Requests</Text>}
+                name="special_requests"
+              >
+                <Input 
+                  className="border-[#D4AF37] focus:ring-[#2C1810]"
+                />
+              </Form.Item>
 
-                  <Form.Item
-                    label={<Text>New Password (Optional)</Text>}
-                    name="password"
-                  >
-                    <Input.Password
-                      placeholder="Leave blank to keep current password"
-                      className="border-[#D4AF37] focus:ring-[#2C1810]"
-                      iconRender={(visible) => (visible ? <EyeOutlined /> : <EyeInvisibleOutlined />)}
-                    />
-                  </Form.Item>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Form.Item
-                      label={<Text>First Name</Text>}
-                      name="firstname"
-                      rules={[{ required: true, message: 'Please input your first name!' }]}
-                    >
-                      <Input 
-                        className="border-[#D4AF37] focus:ring-[#2C1810]"
-                        placeholder="Enter your first name"
-                      />
-                    </Form.Item>
-
-                    <Form.Item
-                      label={<Text>Last Name</Text>}
-                      name="lastname"
-                      rules={[{ required: true, message: 'Please input your last name!' }]}
-                    >
-                      <Input 
-                        className="border-[#D4AF37] focus:ring-[#2C1810]"
-                        placeholder="Enter your last name"
-                      />
-                    </Form.Item>
-                  </div>
-
-                  <Form.Item
-                    label={<Text>Phone Number</Text>}
-                    name="phone_number"
-                    rules={[
-                      { required: true, message: 'Please input your phone number!' },
-                      { min: 10, message: 'Phone number must be 10 digits!' },
-                      { pattern: /^[0-9]+$/, message: 'Phone number can only contain numbers!' }
-                    ]}
-                  >
-                    <div className="relative flex items-center">
-                      <div className="absolute left-0 top-0 bottom-0 flex items-center justify-center bg-gray-100 text-gray-600 w-12 border-r rounded-l">
-                        +63
-                      </div>
-                      <Input
-                        type="text"
-                        placeholder="9123456789"
-                        onChange={handlePhoneNumberChange}
-                        className="border-[#D4AF37] focus:ring-[#2C1810] pl-12"
-                        maxLength={10}
-                        onKeyPress={(e) => {
-                          if (!/[0-9]/.test(e.key)) {
-                            e.preventDefault();
-                          }
-                        }}
-                        style={{ paddingLeft: '48px' }}
-                      />
-                    </div>
-                  </Form.Item>
-
-                  <Form.Item
-                    label={<Text>Special Requests</Text>}
-                    name="special_requests"
-                  >
-                    <Input 
-                      className="border-[#D4AF37] focus:ring-[#2C1810]"
-                    />
-                  </Form.Item>
-
-                  <Form.Item>
-                    <Button
-                      type="primary"
-                      htmlType="submit"
-                      className="w-full bg-[#2C1810] hover:bg-[#3D2317] text-white"
-                      loading={isLoading}
-                    >
-                      {isLoading ? "Saving..." : "Save Changes"}
-                    </Button>
-                  </Form.Item>
-                </div>
-              </Form>
-            </Card>
-          </Content>
-        </PageTransition>
-      </Layout>
+              <Form.Item>
+                <Button
+                  type="primary"
+                  htmlType="submit"
+                  className="w-full bg-[#2C1810] hover:bg-[#3D2317] text-white"
+                  loading={isLoading}
+                >
+                  {isLoading ? "Saving..." : "Save Changes"}
+                </Button>
+              </Form.Item>
+            </div>
+          </Form>
+        </Card>
+      </Content>
 
       {/* Save Confirmation Modal */}
       <Modal
@@ -501,7 +532,7 @@ const Profile = () => {
       >
         <p>Are you sure you want to save these changes to your profile?</p>
       </Modal>
-    </Layout>
+    </AppLayout>
   );
 };
 

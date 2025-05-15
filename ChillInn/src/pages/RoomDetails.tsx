@@ -10,95 +10,171 @@ import {
   SafetyOutlined,
   UserOutlined,
   CheckCircleOutlined,
-  HeartOutlined
+  HeartOutlined,
+  GiftOutlined,
+  DollarOutlined
 } from '@ant-design/icons';
-import Sidebar from '../components/Sidebar';
+import AppLayout from '../components/AppLayout';
 import PageTransition from '../components/PageTransition';
 import BookingForm from '../components/BookingForm';
 import CachedImage from '../components/CachedImage';
+import ReviewList from '../components/ReviewList';
+import { getRoomById, checkRoomAvailability } from '../lib/roomService';
+import { saveRoom, unsaveRoom, checkRoomSaved } from '../lib/userService';
+import { Room } from '../utils/types';
 
 const { Content } = Layout;
 const { Title, Text, Paragraph } = Typography;
 
-interface Amenity {
-  amenity_id: number;
-  name: string;
-  description: string;
-  icon: React.ReactNode;
-}
-
-interface RoomType {
-  room_type_id: number;
-  name: string;
-  price: number;
-  capacity: number;
-  amenities: Amenity[];
-}
-
-interface Room {
-  room_id: number;
-  room_type_id: number;
-  room_number: string;
-  status: 'Available' | 'Occupied' | 'Maintenance';
-  room_type: RoomType;
-  images: string[];
-  description: string;
-}
+// Map of amenity names to icons
+const amenityIcons: Record<string, React.ReactNode> = {
+  'WiFi': <WifiOutlined />,
+  'Mini Bar': <CoffeeOutlined />,
+  'TV': <DesktopOutlined />,
+  'Smart TV': <DesktopOutlined />,
+  'Rain Shower': <ThunderboltOutlined />,
+  'Shower': <ThunderboltOutlined />,
+  'Parking': <CarOutlined />,
+  'Safe': <SafetyOutlined />,
+  'In-room Safe': <SafetyOutlined />
+};
 
 const RoomDetails = () => {
-  const { id } = useParams();
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [room, setRoom] = useState<Room | null>(null);
   const [loading, setLoading] = useState(true);
   const [isBookingModalVisible, setIsBookingModalVisible] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [isSavingRoom, setIsSavingRoom] = useState(false);
+  const [availability, setAvailability] = useState<{
+    available: boolean;
+    conflicting_bookings?: any[];
+  } | null>(null);
 
   useEffect(() => {
-    // Simulate API call to fetch room details
-    setTimeout(() => {
-      setRoom({
-        room_id: parseInt(id || '1'),
-        room_type_id: 1,
-        room_number: "301",
-        status: "Available",
-        description: "Experience luxury and comfort in our Premium Suite. This spacious room offers breathtaking views of the city skyline and modern amenities for an unforgettable stay.",
-        images: [
-          "https://images.unsplash.com/photo-1618773928121-c32242e63f39?q=80&w=2070",
-          "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?q=80&w=2070",
-          "https://images.unsplash.com/photo-1614518921956-0d7c71b7999d?q=80&w=2070",
-          "https://images.unsplash.com/photo-1615874959474-d609969a20ed?q=80&w=2070"
-        ],
-        room_type: {
-          room_type_id: 1,
-          name: "Premium Suite",
-          price: 12000,
-          capacity: 4,
-          amenities: [
-            { amenity_id: 1, name: "High-speed WiFi", description: "Complimentary high-speed internet access", icon: <WifiOutlined /> },
-            { amenity_id: 2, name: "Mini Bar", description: "Fully stocked mini bar with premium selections", icon: <CoffeeOutlined /> },
-            { amenity_id: 3, name: "Smart TV", description: "55-inch 4K Smart TV with Netflix access", icon: <DesktopOutlined /> },
-            { amenity_id: 4, name: "Rain Shower", description: "Luxury rain shower with hot/cold water", icon: <ThunderboltOutlined /> },
-            { amenity_id: 5, name: "Parking", description: "Free covered parking", icon: <CarOutlined /> },
-            { amenity_id: 6, name: "In-room Safe", description: "Electronic in-room safe", icon: <SafetyOutlined /> }
-          ]
-        }
-      });
-      setLoading(false);
-    }, 1000);
+    fetchRoomDetails();
+    // Log for debugging route issues
+    console.log('RoomDetails component mounted with ID:', id);
   }, [id]);
+
+  useEffect(() => {
+    // Check if room is saved when room data is loaded
+    if (room && room.room_id) {
+      checkIfRoomIsSaved();
+    }
+  }, [room]);
+
+  const fetchRoomDetails = async () => {
+    setLoading(true);
+    try {
+      if (!id) {
+        console.error('No room ID provided in URL');
+        message.error('No room ID provided');
+        return;
+      }
+      
+      console.log('Fetching room details for ID:', id);
+      const roomData = await getRoomById(id);
+      console.log('Received room data:', roomData);
+      
+      if (!roomData) {
+        console.error('Room not found with ID:', id);
+        message.error('Room not found');
+        return;
+      }
+      
+      setRoom(roomData);
+      
+      // Also check current availability
+      checkAvailability();
+    } catch (error) {
+      console.error('Error fetching room details:', error);
+      message.error('Failed to load room details. Please try again later.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const checkIfRoomIsSaved = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token || !room) return;
+      
+      const result = await checkRoomSaved(room.room_id, token);
+      setSaved(result.saved);
+    } catch (error) {
+      console.error('Error checking if room is saved:', error);
+    }
+  };
+
+  const checkAvailability = async (checkIn?: string, checkOut?: string) => {
+    try {
+      if (!id) return;
+      
+      // Default to checking availability for next 5 days if dates not provided
+      const today = new Date();
+      const inFiveDays = new Date();
+      inFiveDays.setDate(today.getDate() + 5);
+      
+      const startDate = checkIn || today.toISOString().split('T')[0];
+      const endDate = checkOut || inFiveDays.toISOString().split('T')[0];
+      
+      console.log('Checking availability from', startDate, 'to', endDate);
+      const availabilityData = await checkRoomAvailability(id, startDate, endDate);
+      console.log('Availability response:', availabilityData);
+      setAvailability(availabilityData);
+      
+      // Update room status accordingly
+      if (room) {
+        setRoom({
+          ...room,
+          status: availabilityData.available ? 'Available' : 'Occupied'
+        });
+      }
+    } catch (error) {
+      console.error('Error checking room availability:', error);
+    }
+  };
 
   const handleBookNow = () => {
     setIsBookingModalVisible(true);
   };
 
-  const handleSaveRoom = () => {
-    setSaved(!saved);
-    message.success(saved ? 'Removed from saved rooms' : 'Added to saved rooms');
+  const handleSaveRoom = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token || !room) {
+        message.error('Please login to save rooms');
+        return;
+      }
+      
+      setIsSavingRoom(true);
+      
+      if (saved) {
+        // Remove from saved rooms
+        await unsaveRoom(room.room_id, token);
+        message.success('Removed from saved rooms');
+      } else {
+        // Add to saved rooms
+        await saveRoom(room.room_id, token);
+        message.success('Added to saved rooms');
+      }
+      
+      setSaved(!saved);
+    } catch (error) {
+      console.error('Error saving/unsaving room:', error);
+      message.error('Failed to update saved rooms');
+    } finally {
+      setIsSavingRoom(false);
+    }
   };
 
   const handleBookingSuccess = () => {
     setIsBookingModalVisible(false);
-    // Any additional actions after successful booking
+    message.success('Room booked successfully!');
+    // Refresh availability after booking
+    checkAvailability();
   };
 
   if (loading || !room) {
@@ -109,154 +185,212 @@ const RoomDetails = () => {
     );
   }
 
+  // Get icon for amenity or default to CheckCircleOutlined
+  const getAmenityIcon = (amenityName: string) => {
+    const normalizedName = Object.keys(amenityIcons).find(key => 
+      amenityName.toLowerCase().includes(key.toLowerCase())
+    );
+    
+    return normalizedName ? amenityIcons[normalizedName] : <CheckCircleOutlined />;
+  };
+
   return (
-    <Layout hasSider className="min-h-screen">
-      <Sidebar userRole="guest" />
-      <Layout className="bg-[#F5F5F5]">
-        <PageTransition>
-          <Content className="p-6">
-            <div className="max-w-6xl mx-auto">
-              <Card className="shadow-lg">
-                {/* Image Carousel */}
-                <Carousel autoplay className="mb-8">
-                  {room.images.map((image, index) => (
-                    <div key={index} className="h-[400px]">
-                      <CachedImage
-                        src={image}
-                        alt={`Room Preview ${index + 1}`}
-                        className="w-full h-full object-cover rounded"
-                        lazy={true}
-                        preload={index < 2} // Preload first two images
-                      />
-                    </div>
-                  ))}
-                </Carousel>
+    <AppLayout userRole="guest">
+      <PageTransition>
+        <Content className="p-6">
+          <div className="max-w-6xl mx-auto">
+            <Card className="shadow-lg">
+              {/* Image Carousel */}
+              <Carousel autoplay className="mb-8">
+                {room.images && room.images.length > 0 ? room.images.map((image, index) => (
+                  <div key={index} className="h-[400px]">
+                    <CachedImage
+                      src={image}
+                      alt={`Room Preview ${index + 1}`}
+                      className="w-full h-full object-cover rounded"
+                      lazy={true}
+                      preload={index < 2} // Preload first two images
+                    />
+                  </div>
+                )) : (
+                  <div className="h-[400px] bg-gray-200 flex items-center justify-center">
+                    <Text type="secondary">No images available</Text>
+                  </div>
+                )}
+              </Carousel>
 
-                <Row gutter={[32, 32]}>
-                  {/* Room Details */}
-                  <Col xs={24} lg={16}>
-                    <div className="space-y-6">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <Title level={2}>{room.room_type.name}</Title>
-                          <div className="flex items-center gap-4 mb-4">
-                            <Tag color="green">{room.status}</Tag>
-                            <Text type="secondary">
-                              <UserOutlined /> Up to {room.room_type.capacity} guests
-                            </Text>
-                            <Text type="secondary">Room {room.room_number}</Text>
-                          </div>
-                        </div>
-                        <Button 
-                          icon={saved ? <HeartOutlined style={{ color: '#D4AF37' }} /> : <HeartOutlined />} 
-                          size="large"
-                          onClick={handleSaveRoom}
-                          className={saved ? "border-[#D4AF37] text-[#D4AF37]" : ""}
-                        >
-                          {saved ? "Saved" : "Save"}
-                        </Button>
-                      </div>
-                      
-                      <Paragraph>{room.description}</Paragraph>
-
-                      <Divider />
-
-                      {/* Amenities */}
+              <Row gutter={[32, 32]}>
+                {/* Room Details */}
+                <Col xs={24} lg={16}>
+                  <div className="space-y-6">
+                    <div className="flex justify-between items-start">
                       <div>
-                        <Title level={4}>Room Amenities</Title>
+                        <Title level={2}>{room.room_type.name}</Title>
+                        <div className="flex items-center gap-4 mb-4">
+                          <Tag color={room.status === 'Available' ? 'green' : 'red'}>{room.status}</Tag>
+                          <Text type="secondary">
+                            <UserOutlined /> Up to {room.room_type.capacity} guests
+                          </Text>
+                          <Text type="secondary">Room {room.room_number}</Text>
+                        </div>
+                      </div>
+                      <Button 
+                        icon={saved ? <HeartOutlined style={{ color: '#D4AF37' }} /> : <HeartOutlined />} 
+                        size="large"
+                        onClick={handleSaveRoom}
+                        className={saved ? "border-[#D4AF37] text-[#D4AF37]" : ""}
+                      >
+                        {saved ? "Saved" : "Save"}
+                      </Button>
+                    </div>
+                    
+                    <Paragraph>{room.description}</Paragraph>
+
+                    <Divider />
+
+                    {/* Amenities */}
+                    <div>
+                      <Title level={4}>Room Amenities</Title>
+                      <Row gutter={[16, 16]}>
+                        {room.room_type.amenities && room.room_type.amenities.map(amenity => (
+                          <Col xs={24} sm={12} key={amenity.amenity_id}>
+                            <Card className="h-full">
+                              <div className="flex items-start gap-3">
+                                <div className="text-xl text-[#D4AF37]">
+                                  {getAmenityIcon(amenity.name)}
+                                </div>
+                                <div>
+                                  <Text strong className="block">{amenity.name}</Text>
+                                  <Text type="secondary">{amenity.description}</Text>
+                                </div>
+                              </div>
+                            </Card>
+                          </Col>
+                        ))}
+                      </Row>
+                    </div>
+
+                    <Divider />
+
+                    {/* Services */}
+                    <div>
+                      <Title level={4}>Available Services</Title>
+                      {room.services && room.services.length > 0 ? (
                         <Row gutter={[16, 16]}>
-                          {room.room_type.amenities.map(amenity => (
-                            <Col xs={24} sm={12} key={amenity.amenity_id}>
+                          {room.services.map((serviceInfo, index) => (
+                            <Col xs={24} sm={12} key={index}>
                               <Card className="h-full">
                                 <div className="flex items-start gap-3">
                                   <div className="text-xl text-[#D4AF37]">
-                                    {amenity.icon}
+                                    {serviceInfo.included ? <GiftOutlined /> : <DollarOutlined />}
                                   </div>
                                   <div>
-                                    <Text strong className="block">{amenity.name}</Text>
-                                    <Text type="secondary">{amenity.description}</Text>
+                                    <Text strong className="block">{serviceInfo.service.name}</Text>
+                                    <Text type="secondary">{serviceInfo.service.description}</Text>
+                                    {serviceInfo.included ? (
+                                      <Tag color="green" className="mt-2">Included</Tag>
+                                    ) : serviceInfo.discount_percentage > 0 ? (
+                                      <div className="mt-2">
+                                        <Tag color="orange">{serviceInfo.discount_percentage}% Discount</Tag>
+                                        <Text type="secondary" className="ml-2 line-through">
+                                          ₱{serviceInfo.service.price.toFixed(2)}
+                                        </Text>
+                                        <Text strong className="ml-2 text-[#D4AF37]">
+                                          ₱{(serviceInfo.service.price * (1 - serviceInfo.discount_percentage / 100)).toFixed(2)}
+                                        </Text>
+                                      </div>
+                                    ) : (
+                                      <Text className="mt-2">₱{serviceInfo.service.price.toFixed(2)}</Text>
+                                    )}
                                   </div>
                                 </div>
                               </Card>
                             </Col>
                           ))}
                         </Row>
-                      </div>
-
-                      <Divider />
-
-                      {/* Policies */}
-                      <div>
-                        <Title level={4}>Room Policies</Title>
-                        <List
-                          size="small"
-                          dataSource={[
-                            'Check-in time: 2:00 PM',
-                            'Check-out time: 12:00 PM',
-                            'No smoking allowed',
-                            'Pets not allowed',
-                            'Extra bed available upon request'
-                          ]}
-                          renderItem={item => (
-                            <List.Item>
-                              <div className="flex items-center gap-2">
-                                <CheckCircleOutlined className="text-[#D4AF37]" />
-                                <Text>{item}</Text>
-                              </div>
-                            </List.Item>
-                          )}
-                        />
-                      </div>
+                      ) : (
+                        <Card className="text-center py-4">
+                          <Text type="secondary">No special services available for this room type</Text>
+                        </Card>
+                      )}
                     </div>
-                  </Col>
 
-                  {/* Booking Card */}
-                  <Col xs={24} lg={8}>
-                    <Card className="sticky top-6">
-                      <div className="space-y-4">
-                        <div>
-                          <Title level={3} className="text-[#2C1810] mb-1">
-                            ₱{room.room_type.price.toLocaleString()}
-                          </Title>
-                          <Text type="secondary">per night</Text>
-                        </div>
+                    <Divider />
 
-                        <Divider />
+                    {/* Policies */}
+                    <div>
+                      <Title level={4}>Room Policies</Title>
+                      <List
+                        size="small"
+                        dataSource={[
+                          'Check-in time: 2:00 PM',
+                          'Check-out time: 12:00 PM',
+                          'No smoking allowed',
+                          'Pets not allowed',
+                          'Extra bed available upon request'
+                        ]}
+                        renderItem={item => (
+                          <List.Item>
+                            <CheckCircleOutlined className="mr-2 text-[#D4AF37]" /> {item}
+                          </List.Item>
+                        )}
+                      />
+                    </div>
+                    
+                    <Divider />
+                    
+                    {/* Guest Reviews Section */}
+                    <div className="guest-reviews">
+                      <ReviewList roomId={room.room_id} limit={5} />
+                    </div>
+                  </div>
+                </Col>
 
-                        <div className="mt-4">
-                          <Text>
-                            <UserOutlined className="mr-2" />
-                            Up to {room.room_type.capacity} guests
-                          </Text>
-                        </div>
+                {/* Booking Card */}
+                <Col xs={24} lg={8}>
+                  <Card className="shadow booking-card sticky top-6">
+                    <div className="text-center mb-4">
+                      <Title level={3} className="text-[#2C1810] mb-0">
+                        ₱{room.room_type.price.toLocaleString()}
+                      </Title>
+                      <Text type="secondary">per night</Text>
+                    </div>
 
-                        <Button
-                          type="primary"
-                          size="large"
-                          className="w-full bg-[#2C1810] hover:bg-[#3D2317]"
-                          onClick={handleBookNow}
-                        >
-                          Book Now
-                        </Button>
+                    <Descriptions column={1} className="mb-6">
+                      <Descriptions.Item label="Room Type">{room.room_type.name}</Descriptions.Item>
+                      <Descriptions.Item label="Room Number">{room.room_number}</Descriptions.Item>
+                      <Descriptions.Item label="Status">
+                        <Tag color={room.status === 'Available' ? 'green' : 'red'}>
+                          {room.status}
+                        </Tag>
+                      </Descriptions.Item>
+                      <Descriptions.Item label="Capacity">
+                        {room.room_type.capacity} Person{room.room_type.capacity > 1 ? 's' : ''}
+                      </Descriptions.Item>
+                    </Descriptions>
 
-                        <div className="text-center">
-                          <Text type="secondary">
-                            You won't be charged yet
-                          </Text>
-                        </div>
-                      </div>
-                    </Card>
-                  </Col>
-                </Row>
-              </Card>
-            </div>
-          </Content>
-        </PageTransition>
-      </Layout>
+                    <Button
+                      type="primary"
+                      size="large"
+                      block
+                      onClick={handleBookNow}
+                      disabled={room.status !== 'Available'}
+                      style={{ marginTop: '1em' }}
+                      className="bg-[#2C1810] hover:bg-[#3D2317] mt-5"
+                    >
+                      Book Now
+                    </Button>
+                  </Card>
+                </Col>
+              </Row>
+            </Card>
+          </div>
+        </Content>
+      </PageTransition>
 
       {/* Booking Modal */}
       <Modal
-        title={<Title level={4} className="m-0">Book Your Stay</Title>}
+        title={<Title level={4}>Book Room {room.room_number}</Title>}
         open={isBookingModalVisible}
         onCancel={() => setIsBookingModalVisible(false)}
         footer={null}
@@ -273,7 +407,7 @@ const RoomDetails = () => {
           onCancel={() => setIsBookingModalVisible(false)}
         />
       </Modal>
-    </Layout>
+    </AppLayout>
   );
 };
 
